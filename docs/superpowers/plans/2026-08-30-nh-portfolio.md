@@ -543,6 +543,7 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+.superpowers/
 ```
 
 `local.properties` (커밋 안 됨 — `.gitignore`에 있음):
