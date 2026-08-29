@@ -675,6 +675,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private fun holding(code: String, qty: Long, price: Long, evalAmt: Long = qty * price) =
     Holding(code = code, name = code, qty = qty, remainQty = qty, avgPrice = price, price = price, evalAmt = evalAmt, pnlRate = 0.0)
@@ -800,7 +801,8 @@ class RebalanceTest {
                 val d = plan.lines.first { it.code == h.code }.deltaShares ?: 0L
                 (h.qty + d) * h.price
             }
-            assert(bought <= plan.total) { "bought=$bought total=${plan.total}" }
+            // 지연 오버로드 assertTrue(msg) { block } 과 시그니처가 겹치므로 즉시 오버로드를 쓴다
+            assertTrue(bought <= plan.total, "bought=$bought total=${plan.total}")
         }
     }
 }
