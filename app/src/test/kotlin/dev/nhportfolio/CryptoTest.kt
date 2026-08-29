@@ -5,6 +5,7 @@ import dev.nhportfolio.security.open
 import dev.nhportfolio.security.pbkdf2
 import dev.nhportfolio.security.seal
 import dev.nhportfolio.security.weakPin
+import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
 import kotlin.test.Test
@@ -85,5 +86,13 @@ class CryptoTest {
         for (ok in listOf("135790", "112233", "192837", "100000")) {
             assertFalse(weakPin(ok.toCharArray()), ok)
         }
+    }
+
+    @Test
+    fun `짧은 blob 은 태그 불일치가 아니라 손상이다`() {
+        val key = bytes(32)
+        val short = seal(key, "x".toByteArray()).copyOf(20) // iv(12) + 태그(16) 미만
+        val e = assertFailsWith<GeneralSecurityException> { open(key, short) }
+        assertFalse(e is AEADBadTagException, "짧은 blob 은 '틀린 키' 로 오분류되면 안 된다")
     }
 }
