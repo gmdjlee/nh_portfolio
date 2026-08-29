@@ -3,6 +3,7 @@ package dev.nhportfolio.api
 import android.util.Log
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
+import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
 import dev.nhportfolio.security.Vault
 import io.ktor.client.HttpClient
@@ -10,6 +11,7 @@ import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.post
@@ -21,9 +23,19 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.Parameters
 import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -33,9 +45,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 private const val REST = "https://api.nhplug.com:8443"
 private const val TOKEN_URL = "$REST/oauth2/token"
@@ -53,6 +69,12 @@ private const val RATE_LIMIT_BASE_DELAY_MS = 300L
 private const val WS_PING_SECONDS = 30L
 private const val REQUEST_TIMEOUT_MS = 15_000L
 private const val CONNECT_TIMEOUT_MS = 10_000L
+
+private const val WS = "wss://api.nhplug.com:7070/websocket" // 통보 채널은 국내·해외 모두 7070
+private const val BACKOFF_JITTER_MS = 500L
+private const val BACKOFF_BASE_MS = 1_000L
+private const val BACKOFF_MAX_MS = 30_000L
+private const val BACKOFF_MAX_SHIFT = 5
 
 val NhJson: Json =
     Json {
@@ -279,6 +301,93 @@ class NhApi(
             cts = next
         }
     }
+
+    /**
+     * 사용자 범위의 실시간 체결통보. **토큰의 함수**라서 토큰이 바뀌면 자동으로 재구독하고,
+     * 잠기면([Vault.lock]) `secretsFlow` 가 빈 [Secrets] 를 내보내 세션이 구조적으로 취소된다 —
+     * 타이밍 상수에 기대는 부분이 없다.
+     *
+     * 수집자가 하나면 세션도 하나다(NH 는 앱키당 2세션). 화면을 떠나면 취소가 소켓을 닫는다.
+     */
+    fun fills(): Flow<Fill> = fillsFrom(WS)
+
+    internal fun fillsFrom(ws: String): Flow<Fill> {
+        var streak = 0
+        return vault.secretsFlow
+            .map { it.token }
+            .distinctUntilChanged()
+            .flatMapLatest { cached ->
+                if (cached == null) {
+                    emptyFlow()
+                } else {
+                    flow {
+                        val bearer = token() // 만료됐으면 여기서 발급된다
+                        val session = client.webSocketSession(ws)
+                        try {
+                            CHANNELS.forEach { session.send(Frame.Text(subscribeFrame(bearer, it))) }
+                            for (frame in session.incoming) {
+                                streak = 0 // 프레임을 받았으면 건강한 연결이다
+                                if (frame is Frame.Text) parseFill(frame.readText())?.let { emit(it) }
+                            }
+                        } finally {
+                            session.cancel() // close() 는 suspend 라 취소된 컨텍스트에서 못 쓴다
+                        }
+                        throw NhException("WS", "closed") // 정상 Close 도 재연결 대상이다
+                    }
+                }
+            }.retryWhen { _, _ ->
+                delay(backoffMs(streak++) + Random.nextLong(BACKOFF_JITTER_MS))
+                true
+            }
+    }
+
+    internal companion object {
+        /** 해외 체결통보 `d0` 를 붙일 때는 여기 한 줄. 통보 채널은 전부 같은 7070 세션이다. */
+        internal val CHANNELS = listOf("d2")
+
+        /**
+         * 정확히
+         * `{"header":{"token":"<token>","tr_type":"1"},"body":{"tr_cd":"<trCd>","tr_key":""}}`.
+         * `tr_key` 는 빈 문자열로 **존재해야** 하고 `tr_type` 은 문자열 `"1"` 이다.
+         */
+        internal fun subscribeFrame(
+            token: String,
+            trCd: String,
+        ): String =
+            buildJsonObject {
+                put(
+                    "header",
+                    buildJsonObject {
+                        put("token", token)
+                        put("tr_type", "1")
+                    },
+                )
+                put(
+                    "body",
+                    buildJsonObject {
+                        put("tr_cd", trCd)
+                        put("tr_key", "")
+                    },
+                )
+            }.toString()
+
+        /** 체결 프레임만 [Fill] 로. ack·다른 채널·깨진 값은 null 이고 연결은 유지된다. */
+        internal fun parseFill(text: String): Fill? =
+            runCatching {
+                val root = NhJson.parseToJsonElement(text).jsonObject
+                val trCd =
+                    root["header"]
+                        ?.jsonObject
+                        ?.get("tr_cd")
+                        ?.jsonPrimitive
+                        ?.content
+                if (trCd == null || trCd !in CHANNELS) return null
+                val body = root["body"] ?: return null
+                NhJson.decodeFromJsonElement<FillDto>(body).toFill()
+            }.getOrNull()
+
+        internal fun backoffMs(streak: Int): Long = minOf(BACKOFF_MAX_MS, BACKOFF_BASE_MS shl minOf(streak, BACKOFF_MAX_SHIFT))
+    }
 }
 
 @Serializable
@@ -313,4 +422,24 @@ private data class TokenDto(
     @SerialName("expires_in") val expiresIn: Long = 0,
 ) {
     override fun toString(): String = "TokenDto(***)"
+}
+
+@Serializable
+private data class FillDto(
+    // 실제 체결 프레임이 반드시 갖는 세 필드에는 기본값을 두지 않는다 —
+    // 그래야 ack·오류 프레임이 디코드에 실패해 null 이 된다.
+    val accountno: String,
+    val concgty: String,
+    val concprc: String,
+    @SerialName("issue_nm") val name: String = "",
+    val conctime: String = "",
+) {
+    fun toFill(): Fill? =
+        Fill(
+            acctNo = accountno,
+            name = name,
+            qty = concgty.trim().toLongOrNull() ?: return null, // "0000000005" -> 5
+            price = concprc.trim().toLongOrNull() ?: return null,
+            time = conctime,
+        )
 }
