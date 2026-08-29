@@ -1213,6 +1213,19 @@ MSG
 
 ## Task 4: Vault — DEK 래핑, PIN 잠금, 비밀 봉인
 
+> **구현 후 반영된 수정 (commit `252dcb9`).** 아래 코드 블록은 최초 계획본이며, 리뷰에서 발견된 키 위생 결함 11건이 실제 코드에는 이미 반영되어 있다. 재실행한다면 코드가 아니라 이 목록을 따를 것:
+> 1. **(Critical)** `pbkdf2(...)` 산출물을 지역 변수에 묶고 `finally` 로 소거 — KEK 의 직접 원상이라 `lock()` 이후에도 남으면 잠금이 무의미해진다.
+> 2. `pin.fill('0')` 을 `setPin`·`unlockWithPin` **함수 전체를 감싸는** `finally` 로 이동(약한 PIN 거부·잠금 반환 등 조기 종료 경로에서 PIN 이 남던 문제).
+> 3. `hmac(derived, isFirst)` — PIN 변경 시 Keystore 키를 재생성하지 않는다. 재생성이 "쓰기 실패 시 복구 불가 + '틀린 PIN' 으로 오표시" 창의 유일한 원인이었다. `create` 플래그를 기록하는 테스트 추가.
+> 4. `secretsFlow` 는 `dek?.let { decodeWith(it, prefs) } ?: Secrets()` 로 방어적으로 읽는다(`lock()` 과 `flatMapLatest` 취소 사이 창). `secrets()` 는 그대로 던진다.
+> 5. `open()` KDoc 을 28바이트 경계로 정정 — 그 이상 길이의 변조는 AEAD 특성상 '틀린 키' 와 구분 불가.
+> 6. `unlockWithPin` 이 `salt`/`wrapped` 의 base64 디코드를 방어적으로 감싸 `VaultCorruptException` 으로 라우팅.
+> 7. `VaultTest` 의 `assertFailsWith<IllegalStateException>` 3곳에 `assertFalse(e is VaultCorruptException)` 추가(잠김과 손상을 구분하지 못하던 문제).
+> 8. `CryptoTest` 가 28바이트 경계(`seal(key, ByteArray(0))`)를 고정.
+> 9. `update()` 의 DEK 캡처/`lock()` 경합에 `ponytail:` 주석으로 상한 명시.
+> 10. `opened` 는 무조건, `newDek` 는 **`isFirst` 일 때만** 소거 — PIN 변경 경로에서 `newDek` 는 살아있는 `dek` 와 같은 배열이라 무조건 소거하면 정상 세션을 파괴한다.
+> 11. `hasPin` 에 `distinctUntilChanged()`.
+
 **Files:**
 - Modify: `app/src/main/kotlin/dev/nhportfolio/security/Vault.kt` (Task 3 파일에 이어붙인다)
 - Test: `app/src/test/kotlin/dev/nhportfolio/VaultTest.kt`
