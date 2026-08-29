@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.emptyPreferences
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.api.NhException
+import dev.nhportfolio.api.loadResult
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.security.Vault
 import io.ktor.client.engine.mock.MockEngine
@@ -17,15 +18,20 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.Test
@@ -83,7 +89,7 @@ private class ApiFixture {
             bootCount = { 1 },
         )
 
-    val requests = mutableListOf<HttpRequestData>()
+    val requests: MutableList<HttpRequestData> = CopyOnWriteArrayList()
     var handle: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData = { json("{}") }
 
     val api =
@@ -249,6 +255,8 @@ class NhApiTest {
             assertTrue("\"act_no\":\"20101036881\"" in body, body)
             assertTrue("\"qut_dit_cd\":\"UNT\"" in body, body)
             assertTrue("\"bnc_bse_cd\":\"1\"" in body, body)
+            assertTrue("\"ltg_aot_dit_cd\":\"1\"" in body, body)
+            assertTrue("\"aet_bse\":\"1\"" in body, body)
         }
 
     @Test
@@ -356,11 +364,23 @@ class NhApiTest {
             val f = ApiFixture()
             f.ready()
             f.seedToken("STALE", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis() - 2 * HOUR)
+            val staleSeen = CompletableDeferred<Unit>()
+            val staleCount = AtomicInteger(0)
             f.handle = { req ->
                 when {
-                    req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
-                    req.headers[HttpHeaders.Authorization] == "Bearer STALE" -> json("{}", HttpStatusCode.Unauthorized)
-                    else -> json(ACCOUNTS_BODY)
+                    req.url.encodedPath == "/oauth2/token" -> {
+                        json(TOKEN_BODY)
+                    }
+
+                    req.headers[HttpHeaders.Authorization] == "Bearer STALE" -> {
+                        if (staleCount.incrementAndGet() >= 2) staleSeen.complete(Unit)
+                        staleSeen.await() // 두 코루틴이 모두 STALE 로 요청할 때까지 대기 — 직렬화되면 이 테스트는 무의미하다
+                        json("{}", HttpStatusCode.Unauthorized)
+                    }
+
+                    else -> {
+                        json(ACCOUNTS_BODY)
+                    }
                 }
             }
 
@@ -400,9 +420,23 @@ class NhApiTest {
             var attempts = 0
             f.handle = { if (attempts++ < 2) json("{}", HttpStatusCode.TooManyRequests) else json(ACCOUNTS_BODY) }
 
+            val before = currentTime
             assertEquals(1, f.api.accounts().size)
+            assertEquals(900, currentTime - before, "지연은 300+600=900ms 여야 한다")
             assertEquals(0, f.tokenCalls)
             assertEquals(3, f.requests.size)
+        }
+
+    @Test
+    fun `429 가 재시도 한도를 넘으면 포기하고 토큰도 건드리지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.seedToken("T0", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis())
+            f.handle = { json("{}", HttpStatusCode.TooManyRequests) }
+
+            assertEquals("HTTP429", assertFailsWith<NhException> { f.api.accounts() }.code)
+            assertEquals(0, f.tokenCalls)
         }
 
     @Test
@@ -455,5 +489,15 @@ class NhApiTest {
 
             assertFailsWith<IllegalStateException> { f.api.accounts() }
             assertEquals(0, f.requests.size)
+        }
+
+    @Test
+    fun `loadResult 는 취소를 삼키지 않는다`() =
+        runTest {
+            assertEquals("ok", loadResult { "ok" }.getOrNull())
+            assertTrue(loadResult { error("boom") }.isFailure)
+            assertFailsWith<CancellationException> {
+                loadResult { throw CancellationException("cancelled") }
+            }
         }
 }

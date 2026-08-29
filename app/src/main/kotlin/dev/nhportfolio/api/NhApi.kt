@@ -253,6 +253,7 @@ class NhApi(
     }
 
     /** 연속조회. `cts`/`cts_flag` 는 응답 **헤더**로 오고 다음 요청 헤더로 되돌려 보낸다. */
+    @Suppress("ThrowsCount")
     private suspend inline fun <reified A, reified B> pages(
         path: String,
         input: JsonObject,
@@ -262,9 +263,11 @@ class NhApi(
         while (true) {
             val response = call(path, input, cts)
             if (!response.status.isSuccess()) {
-                throw NhException("HTTP${response.status.value}", response.status.description)
+                throw NhException("HTTP${response.status.value}", "요청이 거부되었습니다")
             }
-            val parsed = NhJson.decodeFromString<NhResponse<A, B>>(response.bodyAsText())
+            val parsed =
+                loadResult { NhJson.decodeFromString<NhResponse<A, B>>(response.bodyAsText()) }
+                    .getOrElse { throw NhException("HTTP${response.status.value}", "bad response body") }
             // 유일한 네트워크 로그. release 에서는 R8 이 제거한다.
             Log.d("NhApi", "$path rsp_cd=${parsed.rspCd} ${parsed.rspMsg}")
             if (parsed.output0 == null && parsed.output1 == null && !parsed.ok) {
