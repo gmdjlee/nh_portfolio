@@ -94,5 +94,6 @@ class CryptoTest {
         val short = seal(key, "x".toByteArray()).copyOf(20) // iv(12) + 태그(16) 미만
         val e = assertFailsWith<GeneralSecurityException> { open(key, short) }
         assertFalse(e is AEADBadTagException, "짧은 blob 은 '틀린 키' 로 오분류되면 안 된다")
+        assertContentEquals(ByteArray(0), open(key, seal(key, ByteArray(0))))
     }
 }

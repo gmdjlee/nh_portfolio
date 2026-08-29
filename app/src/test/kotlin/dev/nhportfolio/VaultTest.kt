@@ -36,6 +36,7 @@ private class Fixture {
     var boot: Int = 7
     var hmacThrows = false
     var hmacMissing = false
+    val createFlags = mutableListOf<Boolean>()
 
     private val dir: File = Files.createTempDirectory("vault").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { it.toByte() }, "HmacSHA256")
@@ -49,7 +50,8 @@ private class Fixture {
     val vault =
         Vault(
             store = store,
-            hmac = { data, _ ->
+            hmac = { data, create ->
+                createFlags += create
                 when {
                     hmacThrows -> error("keystore unavailable")
                     hmacMissing -> null
@@ -162,7 +164,8 @@ class VaultTest {
             f.vault.setPin(GOOD_PIN.toCharArray())
             f.vault.lock()
             f.hmacThrows = true
-            assertFailsWith<IllegalStateException> { f.vault.unlockWithPin(GOOD_PIN.toCharArray()) }
+            val e = assertFailsWith<IllegalStateException> { f.vault.unlockWithPin(GOOD_PIN.toCharArray()) }
+            assertFalse(e is VaultCorruptException, "잠김은 손상이 아니다")
             assertEquals(1, f.prefs()[K.FAILS])
         }
 
@@ -207,7 +210,8 @@ class VaultTest {
             f.vault.setPin(GOOD_PIN.toCharArray())
             f.vault.update { it.copy(appKey = "KEY", token = "T") }
             f.vault.lock()
-            assertFailsWith<IllegalStateException> { f.vault.secrets() }
+            val e = assertFailsWith<IllegalStateException> { f.vault.secrets() }
+            assertFalse(e is VaultCorruptException, "잠김은 손상이 아니다")
             assertEquals(Secrets(), f.vault.secretsFlow.first())
         }
 
@@ -268,6 +272,17 @@ class VaultTest {
             assertEquals("KEY", f.vault.secrets().appKey)
 
             f.vault.lock()
-            assertFailsWith<IllegalStateException> { f.vault.setPin(GOOD_PIN.toCharArray()) }
+            val e = assertFailsWith<IllegalStateException> { f.vault.setPin(GOOD_PIN.toCharArray()) }
+            assertFalse(e is VaultCorruptException, "잠김은 손상이 아니다")
+        }
+
+    @Test
+    fun `PIN 변경은 Keystore 키를 다시 만들지 않는다`() =
+        runTest {
+            val f = Fixture()
+            f.vault.setPin(GOOD_PIN.toCharArray())
+            assertEquals(listOf(true), f.createFlags, "최초 설정은 키를 생성한다")
+            f.vault.setPin(OTHER_PIN.toCharArray())
+            assertEquals(listOf(true, false), f.createFlags, "PIN 변경은 기존 키를 재사용해야 한다")
         }
 }

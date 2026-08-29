@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -90,8 +91,9 @@ fun seal(
 }
 
 /**
- * [seal] 의 역. 키가 틀리거나 변조되면 [javax.crypto.AEADBadTagException],
- * blob 이 잘렸으면 다른 [java.security.GeneralSecurityException] 이 난다.
+ * [seal] 의 역. 키가 틀리거나 변조되면 [javax.crypto.AEADBadTagException] 이 난다.
+ * 28바이트(iv+태그) 미만이면 다른 [java.security.GeneralSecurityException] 이 난다 —
+ * 그 이상 길이의 변조는 AEAD 특성상 '틀린 키' 와 구분되지 않는다.
  */
 fun open(
     key: ByteArray,
@@ -202,18 +204,24 @@ class Vault(
 
     val unlocked: StateFlow<Boolean> = unlockedState.asStateFlow()
 
-    val hasPin: Flow<Boolean> = store.data.map { K.DEK_PIN in it }
+    val hasPin: Flow<Boolean> = store.data.map { K.DEK_PIN in it }.distinctUntilChanged()
 
     /** 잠기면 빈 [Secrets] 를 낸다 — 구독자(소켓)가 에러 없이 멈춘다. */
     val secretsFlow: Flow<Secrets> =
         unlockedState.flatMapLatest { isUnlocked ->
-            if (isUnlocked) store.data.map { decode(it) } else flowOf(Secrets())
+            if (isUnlocked) {
+                store.data.map { prefs -> dek?.let { decodeWith(it, prefs) } ?: Secrets() }
+            } else {
+                flowOf(Secrets())
+            }
         }
 
     suspend fun secrets(): Secrets = decode(store.data.first())
 
     suspend fun update(transform: (Secrets) -> Secrets) {
         val key = dek ?: error("locked")
+        // ponytail: lock() 이 transform 도중 DEK 를 0으로 덮으면 SECRETS 가 못 여는 blob 이 된다(마이크로초 창).
+        // 실측되면 lock() 을 suspend 로 바꿔 pinMutex 로 감싼다.
         store.edit { prefs ->
             val next = transform(decodeWith(key, prefs))
             prefs[K.SECRETS] = seal(key, json.encodeToString(next).toByteArray()).b64()
@@ -224,31 +232,48 @@ class Vault(
      * 최초 설정이면 새 DEK·솔트·Keystore 키를 만들고, 이후에는 잠금이 풀린 상태에서
      * 같은 DEK 를 새 PIN 으로 다시 래핑한다. [pin] 은 반환 전에 지워진다.
      */
+    @Suppress("ThrowsCount")
     suspend fun setPin(pin: CharArray) {
-        require(!weakPin(pin)) { "너무 단순한 PIN 입니다" }
-        val prefs = store.data.first()
-        val isFirst = K.DEK_PIN !in prefs
-        val newDek = if (isFirst) randomBytes(DEK_BYTES) else (dek ?: error("locked"))
-        val salt = if (isFirst) randomBytes(SALT_BYTES) else (prefs[K.SALT] ?: throw VaultCorruptException()).unb64()
-
-        val kek =
-            withContext(Dispatchers.Default) { hmac(pbkdf2(pin, salt, PBKDF2_ITERS), true) }
-                ?: throw VaultCorruptException()
         try {
-            store.edit {
-                it[K.SALT] = salt.b64()
-                it[K.PBKDF2_ITERS] = PBKDF2_ITERS
-                it[K.DEK_PIN] = seal(kek, newDek).b64()
-                it.remove(K.FAILS)
-                it.remove(K.LOCK_ELAPSED)
-                it.remove(K.LOCK_BOOT)
+            require(!weakPin(pin)) { "너무 단순한 PIN 입니다" }
+            val prefs = store.data.first()
+            val isFirst = K.DEK_PIN !in prefs
+            val newDek = if (isFirst) randomBytes(DEK_BYTES) else (dek ?: error("locked"))
+            val salt =
+                if (isFirst) randomBytes(SALT_BYTES) else (prefs[K.SALT] ?: throw VaultCorruptException()).unb64()
+
+            val kek =
+                withContext(Dispatchers.Default) {
+                    val derived = pbkdf2(pin, salt, PBKDF2_ITERS)
+                    try {
+                        hmac(derived, isFirst)
+                    } finally {
+                        derived.fill(0)
+                    }
+                } ?: throw VaultCorruptException()
+            try {
+                store.edit {
+                    it[K.SALT] = salt.b64()
+                    it[K.PBKDF2_ITERS] = PBKDF2_ITERS
+                    it[K.DEK_PIN] = seal(kek, newDek).b64()
+                    it.remove(K.FAILS)
+                    it.remove(K.LOCK_ELAPSED)
+                    it.remove(K.LOCK_BOOT)
+                }
+            } catch (e: Exception) {
+                // PIN 변경(비-최초) 경로에서는 newDek 가 살아있는 dek 와 같은 배열이다 — 지우면
+                // 방금 실패한 시도가 아니라 현재 세션을 깨뜨린다. 최초 설정에서 만든, 아직 아무도
+                // 참조하지 않는 새 배열일 때만 안전하게 지운다.
+                if (isFirst) newDek.fill(0)
+                throw e
+            } finally {
+                kek.fill(0)
             }
+            dek = newDek
+            unlockedState.value = true
         } finally {
-            kek.fill(0)
             pin.fill('0')
         }
-        dek = newDek
-        unlockedState.value = true
     }
 
     /**
@@ -257,52 +282,77 @@ class Vault(
      * 시계는 단조 시계 + BOOT_COUNT 뿐이라 시간 설정을 바꿔 잠금을 줄일 수 없다.
      */
     suspend fun unlockWithPin(pin: CharArray): PinResult =
-        pinMutex.withLock {
-            val initial = store.data.first()
-            val prefs =
-                if (bootCount() != initial[K.LOCK_BOOT]) {
+        try {
+            pinMutex.withLock {
+                val initial = store.data.first()
+                val prefs =
+                    if (bootCount() != initial[K.LOCK_BOOT]) {
+                        store.edit {
+                            it[K.LOCK_ELAPSED] = elapsed() + lockoutMillis(it[K.FAILS] ?: 0)
+                            it[K.LOCK_BOOT] = bootCount()
+                        }
+                    } else {
+                        initial
+                    }
+
+                val lockedUntil = prefs[K.LOCK_ELAPSED] ?: 0L
+                if (elapsed() < lockedUntil) return@withLock PinResult.LockedFor(lockedUntil - elapsed())
+
+                val salt = prefs[K.SALT] ?: throw VaultCorruptException()
+                val iterations = prefs[K.PBKDF2_ITERS] ?: throw VaultCorruptException()
+                val wrapped = prefs[K.DEK_PIN] ?: throw VaultCorruptException()
+                val saltBytes: ByteArray
+                val wrappedBytes: ByteArray
+                try {
+                    saltBytes = salt.unb64()
+                    wrappedBytes = wrapped.unb64()
+                } catch (e: IllegalArgumentException) {
+                    throw VaultCorruptException()
+                }
+
+                val fails =
                     store.edit {
-                        it[K.LOCK_ELAPSED] = elapsed() + lockoutMillis(it[K.FAILS] ?: 0)
-                        it[K.LOCK_BOOT] = bootCount()
+                        val next = (it[K.FAILS] ?: 0) + 1
+                        it[K.FAILS] = next
+                        it[K.LOCK_ELAPSED] = elapsed() + lockoutMillis(next)
+                    }[K.FAILS] ?: 1
+
+                val opened =
+                    withContext(Dispatchers.Default) {
+                        val derived = pbkdf2(pin, saltBytes, iterations)
+                        val kek =
+                            (
+                                try {
+                                    hmac(derived, false)
+                                } finally {
+                                    derived.fill(0)
+                                }
+                            )
+                                ?: throw VaultCorruptException()
+                        try {
+                            unwrap(kek, wrappedBytes)
+                        } finally {
+                            kek.fill(0)
+                        }
                     }
-                } else {
-                    initial
-                }
+                if (opened == null) return@withLock PinResult.Wrong(maxOf(0, MAX_FREE_TRIES - fails))
 
-            val lockedUntil = prefs[K.LOCK_ELAPSED] ?: 0L
-            if (elapsed() < lockedUntil) return@withLock PinResult.LockedFor(lockedUntil - elapsed())
-
-            val salt = prefs[K.SALT] ?: throw VaultCorruptException()
-            val iterations = prefs[K.PBKDF2_ITERS] ?: throw VaultCorruptException()
-            val wrapped = prefs[K.DEK_PIN] ?: throw VaultCorruptException()
-
-            val fails =
-                store.edit {
-                    val next = (it[K.FAILS] ?: 0) + 1
-                    it[K.FAILS] = next
-                    it[K.LOCK_ELAPSED] = elapsed() + lockoutMillis(next)
-                }[K.FAILS] ?: 1
-
-            val opened =
-                withContext(Dispatchers.Default) {
-                    val kek = hmac(pbkdf2(pin, salt.unb64(), iterations), false) ?: throw VaultCorruptException()
-                    try {
-                        unwrap(kek, wrapped.unb64())
-                    } finally {
-                        kek.fill(0)
-                        pin.fill('0')
+                try {
+                    store.edit {
+                        it.remove(K.FAILS)
+                        it.remove(K.LOCK_ELAPSED)
+                        it.remove(K.LOCK_BOOT)
                     }
+                } catch (e: Exception) {
+                    opened.fill(0)
+                    throw e
                 }
-            if (opened == null) return@withLock PinResult.Wrong(maxOf(0, MAX_FREE_TRIES - fails))
-
-            store.edit {
-                it.remove(K.FAILS)
-                it.remove(K.LOCK_ELAPSED)
-                it.remove(K.LOCK_BOOT)
+                dek = opened
+                unlockedState.value = true
+                PinResult.Ok
             }
-            dek = opened
-            unlockedState.value = true
-            PinResult.Ok
+        } finally {
+            pin.fill('0')
         }
 
     fun lock() {
