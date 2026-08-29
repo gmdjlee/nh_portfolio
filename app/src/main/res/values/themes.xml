@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- android:style/Theme.DeviceDefault.DayNight.NoActionBar does not exist on this SDK
+         (compileSdk 37); Theme.DeviceDefault.DayNight is the public parent, NoActionBar
+         reproduced manually via the two window items below. -->
+    <style name="Theme.NhPortfolio" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

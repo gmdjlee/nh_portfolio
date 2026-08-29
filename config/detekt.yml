@@ -1,0 +1,41 @@
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    active: false            # Compose 화면은 길다 — ktlint 와 리뷰가 잡는다
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: false
+
+exceptions:
+  SwallowedException:
+    active: false            # cause 를 일부러 버린다 — 평문·앱키 URL 이 로그/크래시에 실리면 안 된다
+  TooGenericExceptionCaught:
+    active: false            # loadResult 가 앱 전체의 유일한 catch(Exception) 지점이다
+  InstanceOfCheckForException:
+    active: false            # userMessage() 가 예외 타입으로 분기한다
+
+style:
+  MagicNumber:
+    active: false            # bp·잠금 시간·바이트 길이 상수가 전부 걸린다
+  ReturnCount:
+    active: false            # 보안 코드의 early return 이 중첩 if 보다 읽기 쉽다
+  MaxLineLength:
+    maxLineLength: 140
+  ForbiddenImport:
+    active: true
+    includes: ['**/model/**', '**/portfolio/Rebalance.kt']
+    imports:
+      - 'android.*'
+      - 'androidx.*'
+      - 'io.ktor.*'
+      - 'org.koin.*'
+      - 'kotlinx.serialization.*'
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']
+  TopLevelPropertyNaming:
+    active: false            # Compose 색·스타일 값은 PascalCase, 상수 집합은 UPPER_SNAKE 가 관례다
