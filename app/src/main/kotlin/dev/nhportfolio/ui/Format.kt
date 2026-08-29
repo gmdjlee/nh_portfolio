@@ -63,12 +63,12 @@ fun Throwable.userMessage(): String =
             "응답 형식 오류"
         }
 
+        // 잠김 — 게이트가 처리하므로 화면에 아무것도 띄우지 않는다
         is IllegalStateException -> {
             ""
         }
 
-        // 잠김 — 게이트가 처리하므로 화면에 아무것도 띄우지 않는다
         else -> {
-            message ?: "오류가 발생했습니다"
+            "오류가 발생했습니다"
         }
     }

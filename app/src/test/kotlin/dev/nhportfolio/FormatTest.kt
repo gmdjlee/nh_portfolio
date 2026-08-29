@@ -62,4 +62,10 @@ class FormatTest {
         assertTrue("손상" in VaultCorruptException().userMessage())
         assertEquals("", IllegalStateException("locked").userMessage())
     }
+
+    @Test
+    fun `알 수 없는 예외는 원본 메시지를 화면에 내보내지 않는다`() {
+        val leaky = IllegalArgumentException("appkey=APPKEY&appsecretkey=APPSECRET")
+        assertEquals("오류가 발생했습니다", leaky.userMessage())
+    }
 }
