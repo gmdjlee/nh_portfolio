@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -30,7 +31,6 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -54,11 +54,12 @@ private const val BAD_QTY = """
 private class Socket {
     private val dir: File = Files.createTempDirectory("ws").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 3 }, "HmacSHA256")
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val store =
         PreferenceDataStoreFactory.create(
             corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
-            scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+            scope = scope,
         ) { File(dir, "ws.preferences_pb") }
 
     val vault =
@@ -76,6 +77,9 @@ private class Socket {
     /** 연결 횟수. */
     @Volatile var connections = 0
 
+    /** 서버 쪽에서 세션 핸들러가 끝난(= 실제로 끊어진) 횟수. */
+    @Volatile var closedSessions = 0
+
     private var server: io.ktor.server.engine.EmbeddedServer<*, *>? = null
 
     /** [onSubscribed] 는 구독 프레임을 받은 뒤 서버가 할 일. 반환하면 서버가 세션을 닫는다. */
@@ -86,8 +90,15 @@ private class Socket {
                 routing {
                     webSocket("/websocket") {
                         connections++
-                        subscribes += (incoming.receive() as Frame.Text).readText()
-                        onSubscribed()
+                        try {
+                            subscribes += (incoming.receive() as Frame.Text).readText()
+                            onSubscribed()
+                        } finally {
+                            // 핸들러가 끝나는 건 클라이언트가 세션을 취소했거나 서버가 닫았을 때뿐이다 —
+                            // 즉 이 세션이 실제로 죽었다는 증거다. 연결 수만 세면 세션이 살아남아도
+                            // 다음 구독으로 인해 생긴 연결 수와 구분이 안 된다.
+                            closedSessions++
+                        }
                     }
                 }
             }.start(wait = false)
@@ -109,9 +120,9 @@ private class Socket {
         }
     }
 
-    @AfterTest
     fun stop() {
         server?.stop(0, 0)
+        scope.cancel()
     }
 }
 
@@ -139,10 +150,12 @@ class NhSocketTest {
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
-
-            withTimeout(10_000) { await { s.subscribes.isNotEmpty() } }
-            job.cancel()
-            s.stop()
+            try {
+                withTimeout(10_000) { await { s.subscribes.isNotEmpty() } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
 
             val expected =
                 Json.parseToJsonElement(
@@ -163,10 +176,12 @@ class NhSocketTest {
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
-
-            withTimeout(10_000) { await { fills.isNotEmpty() } }
-            job.cancel()
-            s.stop()
+            try {
+                withTimeout(10_000) { await { fills.isNotEmpty() } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
 
             val fill = fills.first()
             assertEquals("20101036881", fill.acctNo)
@@ -193,10 +208,12 @@ class NhSocketTest {
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
-
-            withTimeout(10_000) { await { fills.isNotEmpty() } }
-            job.cancel()
-            s.stop()
+            try {
+                withTimeout(10_000) { await { fills.isNotEmpty() } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
 
             assertEquals(1, fills.size, "체결이 아닌 프레임은 Fill 이 되면 안 된다")
             assertEquals(1, s.connections, "무시한 프레임 때문에 재연결하면 안 된다")
@@ -214,26 +231,56 @@ class NhSocketTest {
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
+            try {
+                withTimeout(15_000) { await(12_000) { s.connections >= 2 } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
+        }
 
-            withTimeout(15_000) { await(12_000) { s.connections >= 2 } }
-            job.cancel()
-            s.stop()
+    @Test
+    fun `ack 만 보내고 끊는 서버에도 백오프가 자란다`() =
+        runBlocking {
+            val s = Socket()
+            val url =
+                s.start {
+                    send(Frame.Text(ACK))
+                    close(CloseReason(CloseReason.Codes.NORMAL, "bye"))
+                }
+            s.ready()
+            val fills = CopyOnWriteArrayList<Fill>()
+            val job = collectFills(s.api, url, fills)
+            try {
+                withTimeout(10_000) { await(9_000) { s.connections >= 2 } }
+                delay(5_000)
+                // 정상 백오프(1s, 2s, 4s...)면 5초 안에 4회를 넘길 수 없다. ack 로 streak 가 초기화되면 매 1초마다 붙는다.
+                assertTrue(s.connections <= 4, "백오프가 무력화됐다: connections=${s.connections}")
+            } finally {
+                job.cancel()
+                s.stop()
+            }
         }
 
     @Test
     fun `토큰이 바뀌면 새 토큰으로 다시 구독한다`() =
         runBlocking {
             val s = Socket()
-            val url = s.start { delay(10_000) }
+            // delay() 만으로는 소켓 상태를 관찰하지 않아 클라이언트가 session.cancel() 해도 서버가 못 알아챈다 —
+            // incoming 을 계속 읽어야(연결이 끊기면 던지거나 채널이 닫힌다) 세션 종료를 실시간으로 감지한다.
+            val url = s.start { while (true) incoming.receive() }
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
-
-            withTimeout(10_000) { await { s.subscribes.size == 1 } }
-            s.vault.update { it.copy(token = "TOKEN2") }
-            withTimeout(10_000) { await { s.subscribes.size == 2 } }
-            job.cancel()
-            s.stop()
+            try {
+                withTimeout(10_000) { await { s.subscribes.size == 1 } }
+                s.vault.update { it.copy(token = "TOKEN2") }
+                withTimeout(10_000) { await { s.subscribes.size == 2 } }
+                withTimeout(10_000) { await { s.closedSessions >= 1 } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
 
             assertTrue("TOKEN2" in s.subscribes[1])
         }
@@ -242,20 +289,25 @@ class NhSocketTest {
     fun `잠그면 세션이 끊기고 다시 열면 재구독한다`() =
         runBlocking {
             val s = Socket()
-            val url = s.start { delay(10_000) }
+            // delay() 만으로는 소켓 상태를 관찰하지 않아 클라이언트가 session.cancel() 해도 서버가 못 알아챈다 —
+            // incoming 을 계속 읽어야(연결이 끊기면 던지거나 채널이 닫힌다) 세션 종료를 실시간으로 감지한다.
+            val url = s.start { while (true) incoming.receive() }
             s.ready()
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
+            try {
+                withTimeout(10_000) { await { s.subscribes.size == 1 } }
+                s.vault.lock()
+                withTimeout(10_000) { await { s.closedSessions >= 1 } }
+                delay(1_500)
+                assertEquals(1, s.subscribes.size, "잠긴 동안 재연결하면 안 된다")
 
-            withTimeout(10_000) { await { s.subscribes.size == 1 } }
-            s.vault.lock()
-            delay(1_500)
-            assertEquals(1, s.subscribes.size, "잠긴 동안 재연결하면 안 된다")
-
-            s.vault.unlockWithPin("135790".toCharArray())
-            withTimeout(10_000) { await { s.subscribes.size == 2 } }
-            job.cancel()
-            s.stop()
+                s.vault.unlockWithPin("135790".toCharArray())
+                withTimeout(10_000) { await { s.subscribes.size == 2 } }
+            } finally {
+                job.cancel()
+                s.stop()
+            }
         }
 
     @Test
@@ -266,10 +318,12 @@ class NhSocketTest {
             s.ready(token = null)
             val fills = CopyOnWriteArrayList<Fill>()
             val job = collectFills(s.api, url, fills)
-
-            delay(1_500)
-            job.cancel()
-            s.stop()
+            try {
+                delay(1_500)
+            } finally {
+                job.cancel()
+                s.stop()
+            }
 
             assertEquals(0, s.connections)
         }
@@ -279,5 +333,6 @@ class NhSocketTest {
         val expected = listOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L, 30_000L, 30_000L)
         expected.forEachIndexed { streak, ms -> assertEquals(ms, NhApi.backoffMs(streak), "streak=$streak") }
         assertEquals(30_000L, NhApi.backoffMs(1_000))
+        assertEquals(30_000L, NhApi.backoffMs(64), "shl 은 하위 6비트만 쓰므로 시프트 상한이 없으면 여기서 1초로 붕괴한다")
     }
 }

@@ -308,6 +308,12 @@ class NhApi(
      * 타이밍 상수에 기대는 부분이 없다.
      *
      * 수집자가 하나면 세션도 하나다(NH 는 앱키당 2세션). 화면을 떠나면 취소가 소켓을 닫는다.
+     *
+     * 이 소켓은 REST 가 확보한 토큰을 **따라간다** — 스스로 토큰을 발급하지 않는다.
+     * 캐시된 토큰이 없으면 연결 자체를 시도하지 않으므로, 수집 전에 REST 호출이
+     * 한 번은 선행해야 한다(PortfolioViewModel 은 항상 balance() 로 시작한다).
+     * 자격증명만 있고 발급이 실패하는 상태에서 소켓이 발급을 재시도하면
+     * 30초마다 토큰 발급을 두드리게 되어 NH 보안 알림을 유발한다 — 그래서 따라가기만 한다.
      */
     fun fills(): Flow<Fill> = fillsFrom(WS)
 
@@ -323,13 +329,17 @@ class NhApi(
                     flow {
                         val bearer = token() // 만료됐으면 여기서 발급된다
                         val session = client.webSocketSession(ws)
+                        val openedAt = System.nanoTime()
                         try {
                             CHANNELS.forEach { session.send(Frame.Text(subscribeFrame(bearer, it))) }
                             for (frame in session.incoming) {
-                                streak = 0 // 프레임을 받았으면 건강한 연결이다
+                                // streak = 0 은 여기서 하지 않는다 — NH 는 구독 ack 를 먼저 보내므로
+                                // ack 만 받고 끊기는 세션이 '건강한 연결' 로 위장해 백오프를 무력화한다.
                                 if (frame is Frame.Text) parseFill(frame.readText())?.let { emit(it) }
                             }
                         } finally {
+                            // 백오프 상한보다 오래 살아남은 세션만 건강했다고 본다.
+                            if ((System.nanoTime() - openedAt) / 1_000_000 > BACKOFF_MAX_MS) streak = 0
                             session.cancel() // close() 는 suspend 라 취소된 컨텍스트에서 못 쓴다
                         }
                         throw NhException("WS", "closed") // 정상 Close 도 재연결 대상이다
