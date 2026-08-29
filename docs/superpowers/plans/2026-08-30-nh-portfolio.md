@@ -1141,6 +1141,9 @@ fun seal(key: ByteArray, plain: ByteArray): ByteArray {
  * blob 이 잘렸으면 다른 [java.security.GeneralSecurityException] 이 난다.
  */
 fun open(key: ByteArray, blob: ByteArray): ByteArray {
+    // iv(12) + 태그(16) 보다 짧으면 seal() 이 만든 blob 이 아니다. 이 검사가 없으면 JDK 가
+    // AEADBadTagException 을 던져 '손상' 이 '틀린 PIN' 으로 오분류된다(§7 의 구분이 무너진다).
+    if (blob.size < IV_BYTES + GCM_TAG_BITS / Byte.SIZE_BITS) throw GeneralSecurityException("blob too short")
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, blob, 0, IV_BYTES))
     return cipher.doFinal(blob, IV_BYTES, blob.size - IV_BYTES)
@@ -1278,7 +1281,7 @@ private class Fixture {
         store = store,
         hmac = { data, _ ->
             when {
-                hmacThrows -> throw IllegalStateException("keystore unavailable")
+                hmacThrows -> error("keystore unavailable")
                 hmacMissing -> null
                 else -> Mac.getInstance("HmacSHA256").apply { init(macKey) }.doFinal(data)
             }
@@ -1681,7 +1684,7 @@ class Vault(
 
     private fun decode(prefs: Preferences): Secrets = decodeWith(dek ?: error("locked"), prefs)
 
-    @Suppress("SwallowedException")
+    @Suppress("SwallowedException", "ThrowsCount")
     private fun decodeWith(key: ByteArray, prefs: Preferences): Secrets {
         val blob = prefs[K.SECRETS] ?: return Secrets()
         return try {
