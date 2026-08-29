@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private fun holding(
     code: String,
@@ -158,7 +159,7 @@ class RebalanceTest {
                     val d = plan.lines.first { it.code == h.code }.deltaShares ?: 0L
                     (h.qty + d) * h.price
                 }
-            assert(bought <= plan.total) { "bought=$bought total=${plan.total}" }
+            assertTrue(bought <= plan.total, "bought=$bought total=${plan.total}")
         }
     }
 }
