@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .b { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .b .num { font-weight: 700; letter-spacing: -.025em; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="b" style="width: 390px; height: 844px; background: #FFFFFF; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 14px 16px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #EDEFF2;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111214" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <span style="font-size: 15px; font-weight: 700;">20101036881</span>
+    </div>
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3F6B4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+  </div>
+
+  <div style="padding: 15px 16px 13px; display: flex; flex-direction: column; gap: 11px; border-bottom: 8px solid #F4F6F8;">
+    <div style="display: flex; flex-direction: column; gap: 1px;">
+      <span style="font-size: 12px; font-weight: 500; color: #6E7481;">총 평가금액</span>
+      <span class="num" style="font-size: 33px; line-height: 1.08;">100,000,000</span>
+      <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500 (+4.36%)</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 9px 12px; display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-size: 11px; color: #6E7481;">현금 (D+2)</span>
+        <span class="num" style="font-size: 16px;">10,000,000</span>
+      </div>
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 9px 12px; display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-size: 11px; color: #6E7481;">목표 합계</span>
+        <span class="num" style="font-size: 16px; color: #1B7A46;">100.00%</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 0;">
+    <div style="display: flex; gap: 18px;">
+      <div style="font-size: 15px; font-weight: 700; padding-bottom: 8px; border-bottom: 2.5px solid #111214;">보유</div>
+      <div style="font-size: 15px; font-weight: 500; color: #6E7481; padding-bottom: 8px;">리밸런스</div>
+    </div>
+    <span style="font-size: 12px; color: #6E7481; padding-bottom: 8px;">5종목</span>
+  </div>
+  <div style="height: 1px; background: #EDEFF2;"></div>
+
+  <div style="flex: 1; overflow: hidden;">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+      <div style="padding: 10px 16px 11px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: baseline;">
+        <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
+        <span class="num" style="font-size: 17px; text-align: right;">{{r.amt}}</span>
+        <span style="font-size: 12px; color: #6E7481;">{{r.sub}}</span>
+        <span class="num" style="font-size: 13px; color: {{r.plc}}; text-align: right;">{{r.pl}}</span>
+        <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; margin-top: 3px;">
+          <div style="width: 64px; height: 7px; border-radius: 4px; background: #EDEFF2; position: relative; flex-shrink: 0;">
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.wNow}}; border-radius: 4px; background: #A9B2BF;"></div>
+            <div style="position: absolute; top: -3px; bottom: -3px; left: {{r.wTgt}}; width: 2px; background: #111214;"></div>
+          </div>
+          <span class="num" style="font-size: 12px; color: #444B57;">{{r.wLabel}}</span>
+          <span style="flex: 1;"></span>
+          <span class="num" style="font-size: 13px; font-weight: 700; color: {{r.dc}}; background: {{r.dbg}}; padding: 3px 9px; border-radius: 7px;">{{r.delta}}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const R = '#D1453B', B = '#2F6BD1';
+    // 매수/매도 칩은 수익률과 같은 빨강/파랑이지만 채운 칩이라 형태로 갈린다.
+    const buy = { dc: '#B5372C', dbg: '#FBE9E7' };
+    const sell = { dc: '#255BB8', dbg: '#E8EFFB' };
+    const flat = { dc: '#6E7481', dbg: '#F1F3F5' };
+    // 눈금은 가장 큰 목표(40%)를 100% 로 잡은 상대 척도 — 목표선이 기준을 알려 준다.
+    return {
+      rows: [
+        { name: '현대차', amt: '35,617,500', sub: '150주 · 237,450', pl: '+7.44%', plc: R, bg: '#FFFFFF',
+          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', ...buy },
+        { name: '삼성전자', amt: '18,550,000', sub: '250주 · 74,200', pl: '+8.48%', plc: R, bg: '#FFFFFF',
+          wNow: '46%', wTgt: '50%', wLabel: '18.55% → 20.00%', delta: '19주 매수', ...buy },
+        { name: '카카오', amt: '13,245,000', sub: '300주 · 44,150', pl: '-15.58%', plc: B, bg: '#FFFFFF',
+          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', ...sell },
+        { name: 'SK하이닉스', amt: '11,670,000', sub: '60주 · 194,500', pl: '+9.27%', plc: R, bg: '#FFFFFF',
+          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', ...sell },
+        { name: 'NAVER', amt: '10,917,500', sub: '55주 · 198,500', pl: '-7.67%', plc: B, bg: '#FFFFFF',
+          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', ...sell },
+        { name: '현금', amt: '10,000,000', sub: '예수금 D+2', pl: '', plc: '#6E7481', bg: '#FAFBFC',
+          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', ...flat },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

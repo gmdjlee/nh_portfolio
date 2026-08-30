@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .a { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .a .num { font-weight: 700; letter-spacing: -.02em; }
+    a { color: #2F4A34; } a:hover { color: #1D3021; }
+  </style>
+</helmet>
+<div class="a" style="width: 390px; height: 844px; background: #F3EEE3; color: #171613; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 16px 16px 12px; display: flex; align-items: center; justify-content: space-between;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#171613" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <span style="font-size: 15px; font-weight: 500; color: #4A5A46;">20101036881</span>
+    </div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F4A34" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+  </div>
+
+  <div style="margin: 0 16px; background: #FFFDF8; border: 1px solid rgba(23,22,19,.10); border-radius: 16px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 14px;">
+    <div style="display: flex; flex-direction: column; gap: 3px;">
+      <div style="font-size: 12px; font-weight: 500; color: #6B7566; letter-spacing: .02em;">총 평가금액</div>
+      <div class="num" style="font-size: 32px; line-height: 1.1;">100,000,000<span style="font-size: 19px; font-weight: 500; color: #6B7566;"> 원</span></div>
+    </div>
+    <div style="height: 1px; background: rgba(23,22,19,.09);"></div>
+    <div style="display: flex; gap: 22px;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 11px; color: #6B7566;">현금 (예수금 D+2)</span>
+        <span class="num" style="font-size: 15px;">10,000,000</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 11px; color: #6B7566;">목표 합계</span>
+        <span class="num" style="font-size: 15px; color: #2F4A34;">100.00%</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 6px; padding: 14px 16px 10px;">
+    <div style="flex: 1; text-align: center; padding: 11px 0; border-radius: 12px; background: #2F4A34; color: #F3EEE3; font-size: 14px; font-weight: 700;">보유</div>
+    <div style="flex: 1; text-align: center; padding: 11px 0; border-radius: 12px; background: rgba(23,22,19,.06); color: #4A5A46; font-size: 14px; font-weight: 500;">리밸런스</div>
+  </div>
+
+  <div style="flex: 1; overflow: hidden; padding: 0 16px;">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+      <div style="background: #FFFDF8; border: 1px solid rgba(23,22,19,.09); border-radius: 14px; padding: 13px 14px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 9px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 16px; font-weight: 700;">{{r.name}}</span>
+          <span class="num" style="font-size: 18px;">{{r.amt}}</span>
+        </div>
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span style="font-size: 12px; color: #6B7566;">{{r.qty}}주 · 평균 {{r.avg}}</span>
+          <span class="num" style="font-size: 14px; color: {{r.plc}};">{{r.pl}}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="flex: 1; height: 7px; border-radius: 4px; background: rgba(23,22,19,.08); position: relative; overflow: hidden;">
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.wNow}}; background: #A8C8A0;"></div>
+            <div style="position: absolute; top: -2px; bottom: -2px; left: {{r.wTgt}}; width: 2px; background: #2F4A34;"></div>
+          </div>
+          <span class="num" style="font-size: 12px; color: #4A5A46; min-width: 96px; text-align: right;">{{r.wLabel}}</span>
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+          <span class="num" style="font-size: 13px; font-weight: 700; color: {{r.dc}}; background: {{r.dbg}}; padding: 4px 10px; border-radius: 8px;">{{r.delta}}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const R = '#B02F26', B = '#2A5FBC';
+    const buy = { dc: '#B02F26', dbg: 'rgba(176,47,38,.10)' };
+    const sell = { dc: '#2A5FBC', dbg: 'rgba(47,107,209,.10)' };
+    return {
+      rows: [
+        { name: '현대차', amt: '35,617,500', qty: '150', avg: '221,000', pl: '+7.44%', plc: R,
+          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', ...buy },
+        { name: '삼성전자', amt: '18,550,000', qty: '250', avg: '68,400', pl: '+8.48%', plc: R,
+          wNow: '46%', wTgt: '50%', wLabel: '18.55% → 20.00%', delta: '19주 매수', ...buy },
+        { name: '카카오', amt: '13,245,000', qty: '300', avg: '52,300', pl: '-15.58%', plc: B,
+          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', ...sell },
+        { name: 'SK하이닉스', amt: '11,670,000', qty: '60', avg: '178,000', pl: '+9.27%', plc: R,
+          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', ...sell },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

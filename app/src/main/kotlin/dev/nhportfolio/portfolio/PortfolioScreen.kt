@@ -1,16 +1,21 @@
 package dev.nhportfolio.portfolio
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -38,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -54,7 +60,9 @@ import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
+import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
+import dev.nhportfolio.ui.deltaChipColors
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
 import dev.nhportfolio.ui.plColor
@@ -91,6 +99,7 @@ private data class CashToggle(
 )
 
 private const val FULL_BP = 10_000
+private val BAR_WIDTH = 64.dp
 private val TARGET_INPUT = Regex("""^\d{1,3}(\.\d{1,2})?$""")
 
 /** [balance] 와 [error] 가 모두 null 이면 최초 로딩. 오류가 나도 마지막 정상 표는 유지한다. */
@@ -543,21 +552,45 @@ private fun SummaryCard(
     cashAssets: Int,
     onNormalize: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth().padding(16.dp)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("총 평가", style = MaterialTheme.typography.bodySmall)
-            Text(plan.total.krw(), style = MaterialTheme.typography.titleMedium)
+    // 카드 테두리를 걷어내고 총액을 화면에서 가장 큰 글자로 둔다 — 먼저 읽히는 숫자가 총액이다.
+    Column(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 15.dp, bottom = 13.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Column {
             Text(
-                if (cashAssets > 0) {
-                    "현금 ${plan.lines.last().currentAmt.krw()} (예수금 + 현금성 ${cashAssets}건)"
-                } else {
-                    "예수금(D+2) ${plan.lines.last().currentAmt.krw()}"
-                },
+                "총 평가금액",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-
+            Text(plan.total.krw(), style = MaterialTheme.typography.displaySmall)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatBox(
+                label = if (cashAssets > 0) "현금 (예수금 + 현금성 ${cashAssets}건)" else "현금 (D+2)",
+                value =
+                    plan.lines
+                        .last()
+                        .currentAmt
+                        .krw(),
+                modifier = Modifier.weight(1f),
+            )
+            StatBox(
+                label = "목표 합계",
+                value = plan.targetSumBp.takeIf { it > 0 }?.bpPct() ?: "미설정",
+                valueColor =
+                    when {
+                        plan.targetSumBp > FULL_BP -> MaterialTheme.colorScheme.error
+                        plan.targetSumBp == FULL_BP -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val sum = plan.targetSumBp
-            if (sum > 0) {
+            // 정확히 100% 면 경고도 버튼도 없다 — 합계 자체는 위 StatBox 가 이미 보여준다.
+            if (sum > 0 && sum != FULL_BP) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -566,9 +599,8 @@ private fun SummaryCard(
                     Text(
                         text =
                             when {
-                                sum > FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 를 넘습니다"
-                                sum < FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 에 미달합니다"
-                                else -> "목표 합계 ${sum.bpPct()}"
+                                sum > FULL_BP -> "100% 를 넘습니다"
+                                else -> "100% 에 미달합니다"
                             },
                         style = MaterialTheme.typography.bodySmall,
                         color =
@@ -592,6 +624,24 @@ private fun SummaryCard(
                 )
             }
         }
+    }
+}
+
+/** 요약 카드의 작은 수치 상자. 라벨은 작게, 숫자는 굵게. */
+@Composable
+private fun StatBox(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Column(
+        modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, color = valueColor)
     }
 }
 
@@ -626,6 +676,8 @@ private fun HoldingsList(
     modifier: Modifier = Modifier,
 ) {
     val byCode = remember(balance) { balance.holdings.associateBy { it.code } }
+    // 막대 눈금은 가장 큰 비중/목표 기준. 절대 눈금이면 작은 종목이 실선이 되어 못 읽는다.
+    val scaleBp = remember(plan) { plan.lines.maxOf { maxOf(it.weightBp, it.targetBp ?: 0) }.coerceAtLeast(1) }
     LazyColumn(modifier.fillMaxWidth()) {
         items(plan.lines) { line ->
             HoldingRow(
@@ -634,6 +686,7 @@ private fun HoldingsList(
                 cashLabel = cashLabel,
                 rebalanceMode = rebalanceMode,
                 checked = line.code in selected,
+                scaleBp = scaleBp,
                 onEdit = { onEdit(line.code, line.targetBp) },
                 onToggle = { onToggle(line.code) },
             )
@@ -648,6 +701,7 @@ private fun HoldingRow(
     holding: Holding?,
     cashLabel: String,
     rebalanceMode: Boolean,
+    scaleBp: Int,
     checked: Boolean,
     onEdit: () -> Unit,
     onToggle: () -> Unit,
@@ -680,7 +734,7 @@ private fun HoldingRow(
                 Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
-            HoldingDetail(line, holding, rebalanceMode)
+            HoldingDetail(line, holding, rebalanceMode, scaleBp)
         }
     }
 }
@@ -691,31 +745,35 @@ private fun HoldingDetail(
     line: Rebalance.Line,
     holding: Holding?,
     rebalanceMode: Boolean,
+    scaleBp: Int,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (rebalanceMode) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        // 보유 명세는 요구 항목이라 리밸런스 탭에서만 접는다 — 편집할 때는 밀도가 더 값지다.
+        if (!rebalanceMode && holding != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
-                DeltaText(line.deltaShares)
+                Text(
+                    "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
+                        "평균 ${holding.avgPrice.krw()} · 현재 ${holding.price.krw()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    holding.pnlRate.pct(),
+                    color = plColor(holding.pnlRate),
+                    style = MaterialTheme.typography.titleSmall,
+                )
             }
-        } else if (holding != null) {
-            Text(
-                "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
-                    "평균 ${holding.avgPrice.krw()} · 현재 ${holding.price.krw()}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(holding.pnlRate.pct(), color = plColor(holding.pnlRate), style = MaterialTheme.typography.bodyMedium)
-                Text("비중 ${weightArrow(line)}", style = MaterialTheme.typography.bodySmall)
-            }
-            // 목표가 있을 때만 한 줄 더 쓴다 — 목표 없는 종목까지 "—" 로 채우면 표가 시끄럽다.
-            if (line.targetBp != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    DeltaText(line.deltaShares)
-                }
-            }
-        } else {
-            Text("비중 ${weightArrow(line)}", style = MaterialTheme.typography.bodySmall)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WeightBar(line.weightBp, line.targetBp, scaleBp)
+            Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.weight(1f))
+            // 목표가 없으면 칩을 띄우지 않는다 — "—" 로 채우면 진짜 할 일이 묻힌다.
+            if (line.targetBp != null) DeltaChip(line.deltaShares)
         }
     }
 }
@@ -724,9 +782,15 @@ private fun HoldingDetail(
 private fun weightArrow(line: Rebalance.Line): String =
     line.targetBp?.let { "${line.weightBp.bpPct()} → ${it.bpPct()}" } ?: line.weightBp.bpPct()
 
-/** 사야 할/팔아야 할 주식 수. 매수는 primary, 매도는 secondary 로 물들인다. */
+/**
+ * 사야 할/팔아야 할 주식 수. 수익률과 같은 빨강·파랑을 쓰되 **채운 칩**이라 형태로 갈린다 —
+ * 한 행에 같은 색이 둘이어도 섞이지 않고, 색만으로 구분하지 않으니 색각 이상에서도 읽힌다.
+ *
+ * 유지·계산 불가는 무채색이다. 아무 일도 없는데 강조하면 진짜 할 일이 묻힌다.
+ */
 @Composable
-private fun DeltaText(delta: Long?) {
+private fun DeltaChip(delta: Long?) {
+    val c = deltaChipColors(delta)
     Text(
         text =
             when (delta) {
@@ -734,14 +798,48 @@ private fun DeltaText(delta: Long?) {
                 0L -> "유지"
                 else -> if (delta > 0) "${delta.shares()}주 매수" else "${(-delta).shares()}주 매도"
             },
-        style = MaterialTheme.typography.bodyMedium,
-        color =
-            when {
-                (delta ?: 0L) > 0 -> MaterialTheme.colorScheme.primary
-                (delta ?: 0L) < 0 -> MaterialTheme.colorScheme.secondary
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
-            },
+        style = MaterialTheme.typography.labelLarge,
+        color = c.ink,
+        modifier =
+            Modifier
+                .background(c.surface, MaterialTheme.shapes.extraSmall)
+                .padding(horizontal = 9.dp, vertical = 3.dp),
     )
+}
+
+/**
+ * 현재 비중과 목표 비중의 거리를 막대 하나로 보여준다. 두 숫자를 읽고 빼는 대신 눈으로 잰다.
+ *
+ * 눈금은 **가장 큰 목표를 100% 로 잡은 상대 척도**다. 절대 눈금(0~100%)이면 비중 10% 종목이
+ * 실선이 되어 못 읽는다. 척도가 상대적이라는 사실은 목표선이 알려 준다 — 채움이 선을 넘으면
+ * 초과, 못 미치면 미달. 목표가 없으면 선을 긋지 않는다.
+ */
+@Composable
+private fun WeightBar(
+    weightBp: Int,
+    targetBp: Int?,
+    scaleBp: Int,
+) {
+    val c = barColors()
+    val scale = scaleBp.coerceAtLeast(1).toFloat()
+    // 목표선이 막대 위아래로 조금 삐져나와야 눈에 걸린다 — 그래서 트랙보다 컨테이너가 높다.
+    Box(Modifier.width(BAR_WIDTH).height(13.dp), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxWidth().height(7.dp).background(c.surface, CircleShape))
+        Box(
+            Modifier
+                .fillMaxWidth((weightBp / scale).coerceIn(0f, 1f))
+                .height(7.dp)
+                .background(c.ink, CircleShape),
+        )
+        targetBp?.let { t ->
+            Box(
+                Modifier.fillMaxWidth((t / scale).coerceIn(0f, 1f)).fillMaxHeight(),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface))
+            }
+        }
+    }
 }
 
 @Composable

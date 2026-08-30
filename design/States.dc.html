@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .s { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .s .num { font-weight: 700; letter-spacing: -.025em; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="s" style="width: 760px; height: 560px; background: #FFFFFF; color: #111214; padding: 26px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px;">
+
+  <div>
+    <div style="font-size: 17px; font-weight: 700;">증감 표시 · 다섯 가지 상태</div>
+    <div style="font-size: 12px; color: #6E7481; margin-top: 3px;">
+      <span class="num">DeltaText</span> 가 내는 네 가지에 "목표 없음" 을 더한 것. 아무 일도 없는 상태에 색을 쓰지 않는 게 요점입니다.
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; border-top: 1px solid #EDEFF2;">
+    <sc-for list="{{states}}" as="s" hint-placeholder-count="5">
+      <div style="display: grid; grid-template-columns: 150px 1fr 250px; gap: 16px; align-items: center; padding: 13px 0; border-bottom: 1px solid #F0F2F4;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 13px; font-weight: 700;">{{s.title}}</span>
+          <span class="num" style="font-size: 11px; color: #868C97;">{{s.cond}}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <div style="width: 64px; height: 7px; border-radius: 4px; background: #EDEFF2; position: relative; flex-shrink: 0;">
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{s.wNow}}; border-radius: 4px; background: #A9B2BF;"></div>
+            <sc-if value="{{s.hasTick}}" hint-placeholder-val="{{ true }}">
+              <div style="position: absolute; top: -3px; bottom: -3px; left: {{s.wTgt}}; width: 2px; background: #111214;"></div>
+            </sc-if>
+          </div>
+          <span class="num" style="font-size: 12px; color: #444B57;">{{s.wLabel}}</span>
+          <span style="flex: 1;"></span>
+          <span class="num" style="font-size: 13px; font-weight: 700; color: {{s.dc}}; background: {{s.dbg}}; padding: 3px 9px; border-radius: 7px;">{{s.delta}}</span>
+        </div>
+        <span style="font-size: 11px; color: #6E7481; line-height: 1.5;">{{s.why}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; gap: 26px; margin-top: 2px;">
+    <div style="flex: 1; background: #F4F6F8; border-radius: 10px; padding: 13px 15px;">
+      <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">비중 바 눈금</div>
+      <div style="font-size: 11px; color: #444B57; line-height: 1.6;">
+        가장 큰 <span class="num">목표</span> 를 100% 로 잡은 <b>상대 척도</b>입니다. 절대 눈금(0~100%)이면 10% 종목이 실선이 되어 못 읽습니다.
+        척도가 상대적이라는 사실은 <b>목표선</b>(검은 세로선)이 알려 줍니다 — 채운 막대가 선을 넘으면 초과, 못 미치면 미달.
+      </div>
+    </div>
+    <div style="flex: 1; background: #F4F6F8; border-radius: 10px; padding: 13px 15px;">
+      <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">같은 색, 다른 형태</div>
+      <div style="font-size: 11px; color: #444B57; line-height: 1.6;">
+        수익률과 매수/매도가 같은 빨강·파랑을 씁니다. 한 행에 같은 색이 둘이면 섞이므로
+        <b>수익률은 맨 글자, 매수/매도는 채운 칩</b>으로 형태를 갈랐습니다. 색만으로 구분하지 않으니 색각 이상에서도 읽힙니다.
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const buy = { dc: '#B5372C', dbg: '#FBE9E7' };
+    const sell = { dc: '#255BB8', dbg: '#E8EFFB' };
+    const flat = { dc: '#6E7481', dbg: '#F1F3F5' };
+    const none = { dc: '#868C97', dbg: 'transparent' };
+    return {
+      states: [
+        { title: '매수', cond: 'delta > 0', wNow: '46%', wTgt: '50%', hasTick: true,
+          wLabel: '18.55% → 20.00%', delta: '19주 매수', ...buy,
+          why: '목표에 미달 — 막대가 목표선 왼쪽에 있습니다.' },
+        { title: '매도', cond: 'delta < 0', wNow: '33%', wTgt: '25%', hasTick: true,
+          wLabel: '13.25% → 10.00%', delta: '74주 매도', ...sell,
+          why: '목표 초과 — 막대가 목표선을 넘었습니다.' },
+        { title: '유지', cond: 'delta == 0', wNow: '25%', wTgt: '25%', hasTick: true,
+          wLabel: '10.00% → 10.00%', delta: '유지', ...flat,
+          why: '이미 목표에 있습니다. 할 일이 없으니 색을 쓰지 않습니다.' },
+        { title: '계산 불가', cond: 'delta == null · 현재가 0', wNow: '18%', wTgt: '30%', hasTick: true,
+          wLabel: '7.20% → 12.00%', delta: '—', ...none,
+          why: '현재가가 0이라 주식 수를 낼 수 없습니다. 칩 배경 없이 흐린 글자.' },
+        { title: '목표 없음', cond: 'targetBp == null', wNow: '27%', wTgt: '0%', hasTick: false,
+          wLabel: '10.92%', delta: '', ...none,
+          why: '목표선도 칩도 없습니다. 현재 앱은 이 줄 자체를 생략합니다 — 그 동작을 유지합니다.' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .t { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .t .num { font-weight: 700; letter-spacing: -.02em; }
+    .t th { font-size: 11px; font-weight: 500; color: #6B7566; text-align: left; padding: 0 12px 7px 0; }
+    .t td { font-size: 13px; padding: 7px 12px 7px 0; border-top: 1px solid rgba(23,22,19,.08); vertical-align: middle; }
+    a { color: #2F4A34; } a:hover { color: #1D3021; }
+  </style>
+</helmet>
+<div class="t" style="width: 1520px; height: 520px; background: #FFFDF8; color: #171613; padding: 28px 32px; box-sizing: border-box; display: flex; gap: 32px;">
+
+  <div style="width: 560px; display: flex; flex-direction: column; gap: 14px;">
+    <div>
+      <div style="font-size: 17px; font-weight: 700;">색 대비 — 계산값</div>
+      <div style="font-size: 12px; color: #6B7566; margin-top: 3px;">WCAG 2.1 명도 대비. 본문 크기 AA는 4.5:1, AAA는 7:1.</div>
+    </div>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr><th>용도</th><th>색 / 배경</th><th>대비</th><th>판정</th></tr>
+      <sc-for list="{{contrast}}" as="c" hint-placeholder-count="6">
+        <tr>
+          <td>{{c.use}}</td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 7px;">
+              <span style="width: 15px; height: 15px; border-radius: 4px; background: {{c.fg}}; border: 1px solid rgba(23,22,19,.15);"></span>
+              <span class="num" style="font-size: 12px;">{{c.pair}}</span>
+            </span>
+          </td>
+          <td class="num">{{c.ratio}}</td>
+          <td><span style="font-size: 11px; font-weight: 700; color: {{c.vc}}; background: {{c.vbg}}; padding: 3px 8px; border-radius: 6px;">{{c.verdict}}</span></td>
+        </tr>
+      </sc-for>
+    </table>
+    <div style="font-size: 12px; color: #6B7566; line-height: 1.55; background: rgba(176,47,38,.07); border-left: 3px solid #B02F26; padding: 9px 12px; border-radius: 0 8px 8px 0;">
+      현재 앱의 <span class="num" style="color: #B02F26;">상승 빨강</span>이 본문 크기 기준에 미달합니다. 수익률은 이 앱에서 가장 자주 읽는 숫자라, 세 방향 모두 이 색을 먼저 고쳤습니다.
+    </div>
+  </div>
+
+  <div style="width: 1px; background: rgba(23,22,19,.10);"></div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 16px;">
+    <div>
+      <div style="font-size: 17px; font-weight: 700;">숫자 타입 스케일</div>
+      <div style="font-size: 12px; color: #6B7566; margin-top: 3px;">전부 tabular figures — 자릿수가 흔들리지 않아 세로로 읽힙니다.</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 11px;">
+      <sc-for list="{{scale}}" as="s" hint-placeholder-count="4">
+        <div style="display: flex; align-items: baseline; gap: 16px;">
+          <span style="font-size: 11px; color: #6B7566; width: 96px; flex-shrink: 0;">{{s.role}}</span>
+          <span class="num" style="font-size: {{s.px}}; line-height: 1.1;">100,000,000</span>
+          <span style="font-size: 11px; color: #9AA096;">{{s.spec}}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="height: 1px; background: rgba(23,22,19,.10);"></div>
+    <div style="display: flex; gap: 26px;">
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <span style="font-size: 11px; color: #6B7566;">현재 (참고)</span>
+        <div style="display: flex; gap: 5px;">
+          <sc-for list="{{oldSw}}" as="s" hint-placeholder-count="5">
+            <div style="width: 42px;">
+              <div style="height: 34px; border-radius: 8px; background: {{s.hex}}; border: 1px solid rgba(23,22,19,.12);"></div>
+              <div style="font-size: 9px; color: #9AA096; margin-top: 3px; text-align: center;">{{s.name}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <span style="font-size: 11px; color: #6B7566;">확정 — B안 색상 시스템</span>
+        <div style="display: flex; gap: 5px;">
+          <sc-for list="{{newSw}}" as="s" hint-placeholder-count="5">
+            <div style="width: 42px;">
+              <div style="height: 34px; border-radius: 8px; background: {{s.hex}}; border: 1px solid rgba(23,22,19,.12);"></div>
+              <div style="font-size: 9px; color: #9AA096; margin-top: 3px; text-align: center;">{{s.name}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const fail = { vc: '#8A1F18', vbg: 'rgba(176,47,38,.12)', verdict: 'AA 미달' };
+    const aa   = { vc: '#1B5E3A', vbg: 'rgba(27,122,70,.12)', verdict: 'AA' };
+    const aaa  = { vc: '#14502F', vbg: 'rgba(27,122,70,.20)', verdict: 'AAA' };
+    return {
+      contrast: [
+        { use: '상승 (현재)', fg: '#D1453B', pair: '#D1453B / #F6F1E7', ratio: '4.03 : 1', ...fail },
+        { use: '하락 (현재)', fg: '#2F6BD1', pair: '#2F6BD1 / #F6F1E7', ratio: '4.86 : 1', ...aa },
+        { use: '상승 — A안', fg: '#B02F26', pair: '#B02F26 / #F3EEE3', ratio: '5.54 : 1', ...aa },
+        { use: '하락 — A안', fg: '#2A5FBC', pair: '#2A5FBC / #F3EEE3', ratio: '5.24 : 1', ...aa },
+        { use: '상승 — B안', fg: '#D1453B', pair: '#D1453B / #FFFFFF', ratio: '4.54 : 1', ...aa },
+        { use: '하락 — B안', fg: '#2F6BD1', pair: '#2F6BD1 / #FFFFFF', ratio: '5.07 : 1', ...aa },
+        { use: '상승 — C안', fg: '#FF5A4E', pair: '#FF5A4E / #0E1116', ratio: '6.15 : 1', ...aa },
+        { use: '하락 — C안', fg: '#4D8DFF', pair: '#4D8DFF / #0E1116', ratio: '5.92 : 1', ...aa },
+        { use: '본문 잉크', fg: '#171613', pair: '#171613 / #F3EEE3', ratio: '15.8 : 1', ...aaa },
+      ],
+      scale: [
+        { role: '계좌 총액', px: '34px', spec: '700 · -0.025em' },
+        { role: '종목 평가금액', px: '18px', spec: '700 · -0.025em' },
+        { role: '수익률 · 비중', px: '14px', spec: '700' },
+        { role: '보조 (단가·수량)', px: '12px', spec: '400' },
+      ],
+      oldSw: [
+        { hex: '#F6F1E7', name: 'Sand' }, { hex: '#3F6B4A', name: 'Moss' },
+        { hex: '#DDE8D6', name: 'Sage' }, { hex: '#D1453B', name: '상승' }, { hex: '#2F6BD1', name: '하락' },
+      ],
+      newSw: [
+        { hex: '#FFFFFF', name: 'Bg' }, { hex: '#F4F6F8', name: 'Surf' }, { hex: '#3F6B4A', name: 'Moss' },
+        { hex: '#D1453B', name: '상승' }, { hex: '#2F6BD1', name: '하락' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

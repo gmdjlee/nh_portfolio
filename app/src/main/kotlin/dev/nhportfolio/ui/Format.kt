@@ -3,6 +3,7 @@ package dev.nhportfolio.ui
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import dev.nhportfolio.api.NhException
 import dev.nhportfolio.security.VaultCorruptException
 import kotlinx.serialization.SerializationException
@@ -25,14 +26,52 @@ fun Int.bpPct(): String = formatter("#,##0.00").format(this / 100.0) + "%"
 /** 수익률. 부호를 항상 붙인다. */
 fun Double.pct(): String = formatter("+#,##0.00;-#,##0.00").format(this) + "%"
 
-/** 국내 관례: 이익 빨강, 손실 파랑. */
+/** 배경이 어두운 테마인지. 손익·칩 색을 배경에 맞춰 고르는 데 쓴다. */
 @Composable
-fun plColor(value: Double): Color =
-    when {
-        value > 0 -> ProfitRed
-        value < 0 -> LossBlue
+private fun onDark(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
+/** 국내 관례: 이익 빨강, 손실 파랑. 배경에 따라 대비를 맞춘 값을 고른다. */
+@Composable
+fun plColor(value: Double): Color {
+    val dark = onDark()
+    return when {
+        value > 0 -> if (dark) ProfitRedDark else ProfitRed
+        value < 0 -> if (dark) LossBlueDark else LossBlue
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+}
+
+/** 매수/매도 칩의 글자색과 배경색. 수익률과 색은 같아도 칩이라는 형태로 갈린다. */
+data class ChipColors(
+    val ink: Color,
+    val surface: Color,
+)
+
+/**
+ * [delta] 주식 수에 맞는 칩 색. 아무 일도 없는 상태(유지·계산 불가)에는 색을 쓰지 않는다 —
+ * 색은 행동이 필요할 때만 쓴다.
+ */
+@Composable
+fun deltaChipColors(delta: Long?): ChipColors {
+    val dark = onDark()
+    return when {
+        delta == null || delta == 0L -> {
+            ChipColors(MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.colorScheme.surfaceVariant)
+        }
+
+        delta > 0 -> {
+            if (dark) ChipColors(BuyInkDark, BuySurfaceDark) else ChipColors(BuyInk, BuySurface)
+        }
+
+        else -> {
+            if (dark) ChipColors(SellInkDark, SellSurfaceDark) else ChipColors(SellInk, SellSurface)
+        }
+    }
+}
+
+/** 비중 바의 트랙색과 채움색. 무채색이라 손익·행동 색과 겹치지 않는다. */
+@Composable
+fun barColors(): ChipColors = if (onDark()) ChipColors(BarFillDark, BarTrackDark) else ChipColors(BarFill, BarTrack)
 
 /**
  * 예외 -> 사용자 문구. 비밀이 담길 수 있는 원본 메시지는 절대 그대로 쓰지 않는다
