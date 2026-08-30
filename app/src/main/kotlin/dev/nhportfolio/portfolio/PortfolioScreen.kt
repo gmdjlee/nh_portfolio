@@ -236,6 +236,7 @@ fun PortfolioScreen(
     /** 편집 대상 종목코드들. 한 개면 단건, 여러 개면 일괄. 예수금은 언제나 단건이다. */
     var editing by remember { mutableStateOf<Pair<List<String>, Int?>?>(null) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
+    var confirmClear by remember { mutableStateOf(false) }
 
     // 보유 탭으로 나가면 선택은 의미가 없다 — 남겨 두면 다시 들어왔을 때 놀란다.
     if (!rebalanceMode && selected.isNotEmpty()) selected = emptySet()
@@ -305,6 +306,7 @@ fun PortfolioScreen(
                             BatchBar(
                                 count = selected.size,
                                 onClear = { selected = emptySet() },
+                                onClearTargets = { confirmClear = true },
                                 onSet = { editing = selected.toList() to null },
                             )
                         }
@@ -313,6 +315,16 @@ fun PortfolioScreen(
             }
         }
     }
+
+    ClearTargetsDialog(
+        count = selected.size.takeIf { confirmClear },
+        onDismiss = { confirmClear = false },
+        onConfirm = {
+            vm.setTargets(selected.toList(), null)
+            confirmClear = false
+            selected = emptySet()
+        },
+    )
 
     editing?.let { (codes, currentBp) ->
         TargetEditor(
@@ -401,6 +413,7 @@ private fun SelectAllBar(
 private fun BatchBar(
     count: Int,
     onClear: () -> Unit,
+    onClearTargets: () -> Unit,
     onSet: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
@@ -411,11 +424,35 @@ private fun BatchBar(
         ) {
             Text("${count}개 선택", style = MaterialTheme.typography.bodyMedium)
             Row {
-                TextButton(onClick = onClear) { Text("해제") }
-                TextButton(onClick = onSet) { Text("목표 비중 설정") }
+                // "해제" 는 선택 해제인지 목표 해제인지 헷갈린다 — 둘을 또렷이 갈라 쓴다.
+                TextButton(onClick = onClear) { Text("선택 취소") }
+                TextButton(onClick = onClearTargets) { Text("목표 지우기") }
+                TextButton(onClick = onSet) { Text("목표 설정") }
             }
         }
     }
+}
+
+/**
+ * 목표 일괄 삭제 확인. [count] 가 null 이면 아무것도 그리지 않는다.
+ *
+ * 되돌리기가 없는 앱이고 "전체 선택 -> 목표 지우기" 는 두 번의 탭으로 공들여 잡은 목표를
+ * 전부 날린다. 설정은 확인 없이 두고 삭제에만 한 번 묻는다.
+ */
+@Composable
+private fun ClearTargetsDialog(
+    count: Int?,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    if (count == null) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("목표 지우기") },
+        text = { Text("선택한 ${count}개 종목의 목표 비중을 지웁니다. 되돌릴 수 없습니다.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("지우기") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
 }
 
 @Composable
