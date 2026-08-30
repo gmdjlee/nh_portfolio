@@ -485,25 +485,8 @@ private fun HoldingDetail(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (rebalanceMode) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    "${line.weightBp.bpPct()} → ${line.targetBp?.bpPct() ?: "목표 없음"}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text =
-                        when (val delta = line.deltaShares) {
-                            null -> "—"
-                            0L -> "유지"
-                            else -> if (delta > 0) "${delta.shares()}주 매수" else "${(-delta).shares()}주 매도"
-                        },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color =
-                        when {
-                            (line.deltaShares ?: 0L) > 0 -> MaterialTheme.colorScheme.primary
-                            (line.deltaShares ?: 0L) < 0 -> MaterialTheme.colorScheme.secondary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                )
+                Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
+                DeltaText(line.deltaShares)
             }
         } else if (holding != null) {
             Text(
@@ -513,12 +496,42 @@ private fun HoldingDetail(
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(holding.pnlRate.pct(), color = plColor(holding.pnlRate), style = MaterialTheme.typography.bodyMedium)
-                Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
+                Text("비중 ${weightArrow(line)}", style = MaterialTheme.typography.bodySmall)
+            }
+            // 목표가 있을 때만 한 줄 더 쓴다 — 목표 없는 종목까지 "—" 로 채우면 표가 시끄럽다.
+            if (line.targetBp != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    DeltaText(line.deltaShares)
+                }
             }
         } else {
-            Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
+            Text("비중 ${weightArrow(line)}", style = MaterialTheme.typography.bodySmall)
         }
     }
+}
+
+/** 목표가 있으면 `현재 → 목표`, 없으면 현재 비중만. 예수금 행도 같은 표기를 쓴다. */
+private fun weightArrow(line: Rebalance.Line): String =
+    line.targetBp?.let { "${line.weightBp.bpPct()} → ${it.bpPct()}" } ?: line.weightBp.bpPct()
+
+/** 사야 할/팔아야 할 주식 수. 매수는 primary, 매도는 secondary 로 물들인다. */
+@Composable
+private fun DeltaText(delta: Long?) {
+    Text(
+        text =
+            when (delta) {
+                null -> "—"
+                0L -> "유지"
+                else -> if (delta > 0) "${delta.shares()}주 매수" else "${(-delta).shares()}주 매도"
+            },
+        style = MaterialTheme.typography.bodyMedium,
+        color =
+            when {
+                (delta ?: 0L) > 0 -> MaterialTheme.colorScheme.primary
+                (delta ?: 0L) < 0 -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+    )
 }
 
 @Composable
