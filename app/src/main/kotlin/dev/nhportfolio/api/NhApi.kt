@@ -13,14 +13,12 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.bearerAuth
-import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.Parameters
 import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
 import io.ktor.websocket.Frame
@@ -232,7 +230,10 @@ class NhApi(
                         parameters.append("grant_type", "client_credentials")
                         parameters.append("scope", "oob")
                     }
-                    setBody(FormDataContent(Parameters.Empty)) // Content-Type 만 x-www-form-urlencoded, 본문은 비움
+                    // FormDataContent 를 쓰면 안 된다 — Ktor 가 charset=UTF-8 을 자동으로 붙이는데
+                    // NH 게이트웨이는 파라미터가 붙은 Content-Type 을 거부한다(IGW40050).
+                    // TextContent 는 넘긴 ContentType 을 그대로 보낸다. 본문은 비운다.
+                    setBody(TextContent("", ContentType.Application.FormUrlEncoded))
                 }
             }.getOrElse { cause ->
                 // cause 를 붙이지 않는다 — Ktor 타임아웃 메시지에는 appkey 가 담긴 URL 이 들어 있다

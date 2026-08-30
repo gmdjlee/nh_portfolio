@@ -137,10 +137,12 @@ class NhApiTest {
             assertEquals("client_credentials", token.url.parameters["grant_type"])
             assertEquals("oob", token.url.parameters["scope"])
             assertNull(token.headers[HttpHeaders.Authorization])
-            assertTrue(
-                token.body.contentType
-                    .toString()
-                    .startsWith("application/x-www-form-urlencoded"),
+            // startsWith 로 두면 안 된다 — NH 게이트웨이는 charset 같은 파라미터가 붙은
+            // Content-Type 을 거부한다(IGW40050 "Content-Type이 유효하지 않습니다").
+            // 정확히 일치해야 한다. 느슨하게 봤다가 실기기에서 발급이 통째로 막혔다.
+            assertEquals(
+                "application/x-www-form-urlencoded",
+                token.body.contentType.toString(),
             )
         }
 
