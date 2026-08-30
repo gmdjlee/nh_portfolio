@@ -58,6 +58,20 @@ internal val BuySurfaceDark = Color(0xFF2A1A18)
 internal val SellInkDark = Color(0xFF7FAEFF)
 internal val SellSurfaceDark = Color(0xFF16202E)
 
+/**
+ * 계좌 구성 파이 — 주식 인디고, 현금 앰버.
+ *
+ * 손익(빨강·파랑)과 조작 요소(Moss 초록)가 쓰는 색은 피했다 — 한 행 안에서 뜻이 섞이면 안 된다.
+ * 파이 색을 그대로 작은 글자에 쓰면 앰버가 흰 바탕에서 2.2:1 로 못 읽으므로 라벨은 어두운 값을
+ * 따로 둔다(#4A44B8 7.5:1, #8A6410 5.4:1).
+ */
+internal val StockIndigo = Color(0xFF5B54D6)
+internal val CashAmber = Color(0xFFE0A32E)
+internal val StockIndigoInk = Color(0xFF4A44B8)
+internal val CashAmberInk = Color(0xFF8A6410)
+internal val StockIndigoDark = Color(0xFF8B84FF)
+internal val CashAmberDark = Color(0xFFF0B94E)
+
 /** 비중 바 — 채운 막대는 무채색으로 둔다. 색은 행동(칩)에만 쓴다. */
 internal val BarTrack = Color(0xFFEDEFF2)
 internal val BarFill = Color(0xFFA9B2BF)

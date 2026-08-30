@@ -71,3 +71,54 @@ fun RefreshIcon(
         drawPath(head, tint, style = strokeStyle(s))
     }
 }
+
+/** 이름 수정 — 연필. */
+@Composable
+fun PencilIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 17.dp,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Canvas(modifier.size(size)) {
+        val s = this.size.minDimension / GRID
+        val path =
+            Path().apply {
+                moveTo(12f * s, 20f * s)
+                lineTo(21f * s, 20f * s)
+                moveTo(16.5f * s, 3.5f * s)
+                lineTo(20.5f * s, 7.5f * s)
+                lineTo(7f * s, 21f * s)
+                lineTo(3f * s, 22f * s)
+                lineTo(4f * s, 18f * s)
+                close()
+            }
+        drawPath(path, tint, style = strokeStyle(s))
+    }
+}
+
+/** 설정 — 톱니. 원 하나와 짧은 살 여덟 개로 그린다(SVG 톱니 경로는 이 크기에서 뭉갠다). */
+@Composable
+fun SettingsIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = DEFAULT_SIZE,
+    tint: Color = MaterialTheme.colorScheme.primary,
+) {
+    Canvas(modifier.size(size)) {
+        val s = this.size.minDimension / GRID
+        val cx = 12f * s
+        val cy = 12f * s
+        drawCircle(tint, radius = 4.2f * s, center = Offset(cx, cy), style = strokeStyle(s))
+        repeat(8) { i ->
+            val a = Math.toRadians(i * 45.0)
+            val dx = kotlin.math.cos(a).toFloat()
+            val dy = kotlin.math.sin(a).toFloat()
+            drawLine(
+                color = tint,
+                start = Offset(cx + dx * 6.6f * s, cy + dy * 6.6f * s),
+                end = Offset(cx + dx * 9.4f * s, cy + dy * 9.4f * s),
+                strokeWidth = STROKE * s,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}

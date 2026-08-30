@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    .st { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .st .num { font-weight: 700; letter-spacing: -.025em; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="st" style="width: 820px; height: 560px; background: #FFFFFF; color: #111214; padding: 26px 28px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px;">
+
+  <div>
+    <div style="font-size: 17px; font-weight: 700;">계좌명 · 요약이 없을 때</div>
+    <div style="font-size: 12px; color: #6E7481; margin-top: 3px;">
+      NH API 는 계좌명을 주지 않고, 요약은 계좌마다 잔고를 따로 불러야 나옵니다. 그 사이와 실패를 어떻게 보여줄지 정의합니다.
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; border-top: 1px solid #EDEFF2;">
+    <sc-for list="{{states}}" as="s" hint-placeholder-count="4">
+      <div style="display: grid; grid-template-columns: 132px 1fr 268px; gap: 16px; align-items: center; padding: 13px 0; border-bottom: 1px solid #F0F2F4;">
+        <span style="font-size: 13px; font-weight: 700;">{{s.title}}</span>
+        <div style="display: flex; flex-direction: column; gap: 4px; background: #FAFBFC; border-radius: 8px; padding: 10px 12px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 15px; font-weight: 700; color: {{s.nameColor}};">{{s.name}}</span>
+            <span style="flex: 1;"></span>
+            <span class="num" style="font-size: 16px; color: {{s.amtColor}};">{{s.amount}}</span>
+          </div>
+          <div style="display: flex; align-items: baseline; justify-content: space-between;">
+            <span class="num" style="font-size: 11px; color: #6E7481;">{{s.sub}}</span>
+            <span class="num" style="font-size: 12px; color: {{s.plColor}};">{{s.pl}}</span>
+          </div>
+        </div>
+        <span style="font-size: 11px; color: #6E7481; line-height: 1.55;">{{s.why}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; gap: 24px;">
+    <div style="flex: 1; background: #F4F6F8; border-radius: 10px; padding: 13px 15px;">
+      <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">계좌명은 사용자가 짓습니다</div>
+      <div style="font-size: 11px; color: #444B57; line-height: 1.6;">
+        NH 의 계좌 목록 응답에는 <span class="num">acct_no</span> 와 <span class="num">acct_type</span> 뿐입니다 —
+        종합계좌·CMA·IRP 를 알려 주는 필드가 없습니다. 앱이 계좌번호로 종류를 추측하면 틀렸을 때
+        엉뚱한 계좌를 열게 됩니다. 이름은 사용자가 붙이고, 붙이기 전까지는 API 가 주는
+        <b>계좌구분</b>(운영 일반 / 주문대리인)을 흐린 글자로 대신 씁니다.
+      </div>
+    </div>
+    <div style="flex: 1; background: #F4F6F8; border-radius: 10px; padding: 13px 15px;">
+      <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">요약은 계좌 수만큼 호출이 늡니다</div>
+      <div style="font-size: 11px; color: #444B57; line-height: 1.6;">
+        지금 이 화면은 API 를 <b>한 번</b> 부릅니다. 요약을 채우려면 계좌마다 잔고를 더 불러야 하므로
+        <b>계좌 수만큼</b> 늘어납니다(NH 는 초당 약 5건). 계좌가 서너 개면 문제없지만,
+        먼저 목록을 그리고 요약은 도착하는 대로 채웁니다 — 숫자가 없다고 화면을 붙잡지 않습니다.
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      states: [
+        { title: '이름 지정됨', name: '종합계좌', nameColor: '#111214', amount: '100,000,000', amtColor: '#111214',
+          sub: '20101036881 · 5종목', pl: '+4,182,500', plColor: '#D1453B',
+          why: '사용자가 붙인 이름. 계좌번호는 아래 줄로 내려가 확인용으로 남습니다.' },
+        { title: '이름 없음', name: '운영 일반', nameColor: '#9AA1AC', amount: '12,500,000', amtColor: '#111214',
+          sub: '20101055103 · 2종목', pl: '+238,000', plColor: '#D1453B',
+          why: 'acct_type 에서 온 계좌구분을 흐린 글자로. 지어낸 이름이 아니라는 걸 색으로 알립니다.' },
+        { title: '요약 로딩 중', name: '종합계좌', nameColor: '#111214', amount: '— — —', amtColor: '#C7CDD6',
+          sub: '20101036881', pl: '', plColor: '#6E7481',
+          why: '목록은 이미 보입니다. 금액 자리만 비워 두고 도착하는 대로 채웁니다.' },
+        { title: '요약 실패', name: '종합계좌', nameColor: '#111214', amount: '조회 실패', amtColor: '#9AA1AC',
+          sub: '20101036881 · 다시 시도', pl: '', plColor: '#6E7481',
+          why: '한 계좌가 실패해도 나머지는 그대로 보여줍니다. 그 행만 다시 부릅니다.' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

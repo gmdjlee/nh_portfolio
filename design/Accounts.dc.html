@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .ac { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .ac .num { font-weight: 700; letter-spacing: -.025em; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="ac" style="width: 390px; height: 844px; background: #FFFFFF; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="padding: 14px 8px 12px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #EDEFF2;">
+    <span style="font-size: 17px; font-weight: 700;">계좌</span>
+    <div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3F6B4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 004.6 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 3.6 1.65 1.65 0 0010 2.09V2a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 8v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+      </svg>
+    </div>
+  </div>
+
+  <div style="padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 2px; border-bottom: 8px solid #F4F6F8;">
+    <span style="font-size: 12px; font-weight: 500; color: #6E7481;">전체 평가금액</span>
+    <span class="num" style="font-size: 33px; line-height: 1.08;">138,920,000</span>
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-top: 1px;">
+      <span class="num" style="font-size: 15px; color: #D1453B;">+5,240,500 (+3.92%)</span>
+      <span style="font-size: 12px; color: #6E7481;">3개 계좌</span>
+    </div>
+  </div>
+
+  <div style="flex: 1; overflow: hidden;">
+    <sc-for list="{{accounts}}" as="a" hint-placeholder-count="3">
+      <div style="padding: 13px 16px 14px; border-bottom: 1px solid #F0F2F4; display: flex; flex-direction: column; gap: 6px;">
+
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 16px; font-weight: 700; color: {{a.nameColor}};">{{a.name}}</span>
+          <sc-if value="{{a.dormant}}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 10px; font-weight: 700; color: #6E7481; background: #F1F3F5; padding: 2px 7px; border-radius: 6px;">휴면</span>
+          </sc-if>
+          <span style="flex: 1;"></span>
+          <span class="num" style="font-size: 18px;">{{a.amount}}</span>
+        </div>
+
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span class="num" style="font-size: 12px; color: #6E7481;">{{a.no}} · {{a.stocks}}종목</span>
+          <span class="num" style="font-size: 13px; color: {{a.plColor}};">{{a.pl}}</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 1px;">
+          <div style="width: 22px; height: 22px; border-radius: 50%; background: {{a.pie}}; flex-shrink: 0;"></div>
+          <span class="num" style="font-size: 11px; color: #4A44B8;">주식 {{a.stockLabel}}</span>
+          <span style="font-size: 11px; color: #C7CDD6;">·</span>
+          <span class="num" style="font-size: 11px; color: #8A6410;">현금 {{a.cashLabel}}</span>
+          <span style="flex: 1;"></span>
+          <div style="width: 44px; height: 30px; display: flex; align-items: center; justify-content: flex-end;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9AA1AC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const R = '#D1453B';
+    // 손익(빨강·파랑)과 조작 요소(모스 초록)가 이미 쓰는 색은 피한다 — 한 행에서 섞이면 안 된다.
+    // 주식 인디고, 현금 앰버. 라벨은 같은 색상의 어두운 값이라 흰 바탕에서 읽힌다(7.5:1 / 5.4:1).
+    const pie = (stock) => `conic-gradient(#5B54D6 0 ${stock}%, #E0A32E ${stock}% 100%)`;
+    return {
+      accounts: [
+        { name: '종합계좌', nameColor: '#111214', no: '20101036881', stocks: '5', amount: '100,000,000',
+          pl: '+4,182,500 (+4.36%)', plColor: R, dormant: false,
+          pie: pie(90.0), stockLabel: '90.0%', cashLabel: '10.0%' },
+        { name: 'CMA', nameColor: '#111214', no: '20101047992', stocks: '1', amount: '26,420,000',
+          pl: '+820,000 (+3.20%)', plColor: R, dormant: false,
+          pie: pie(7.6), stockLabel: '7.6%', cashLabel: '92.4%' },
+        // 이름을 아직 안 지은 계좌 — API 가 주는 계좌구분을 흐린 글자로 대신 보여준다.
+        { name: '운영 일반', nameColor: '#9AA1AC', no: '20101055103', stocks: '2', amount: '12,500,000',
+          pl: '+238,000 (+1.94%)', plColor: R, dormant: true,
+          pie: pie(95.9), stockLabel: '95.9%', cashLabel: '4.1%' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

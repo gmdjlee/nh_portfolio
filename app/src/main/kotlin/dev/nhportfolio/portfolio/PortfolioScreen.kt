@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -59,6 +58,10 @@ import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
+import dev.nhportfolio.store.cashKey
+import dev.nhportfolio.store.readCashCodes
+import dev.nhportfolio.store.readTargets
+import dev.nhportfolio.store.targetsKey
 import dev.nhportfolio.ui.BackIcon
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
@@ -88,7 +91,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
-import java.security.MessageDigest
 import kotlin.math.roundToInt
 
 private const val FILL_DEBOUNCE_MS = 300L
@@ -266,34 +268,6 @@ private fun fillMessage(fill: Fill): String {
             .orEmpty()
     return "${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at"
 }
-
-/** 계좌번호를 키 이름으로 노출하지 않는다 — 저장값 자체는 평문이다. */
-private fun accountKey(
-    prefix: String,
-    acctNo: String,
-): Preferences.Key<String> {
-    val digest = MessageDigest.getInstance("SHA-256").digest(acctNo.toByteArray())
-    return stringPreferencesKey(prefix + digest.joinToString("") { "%02x".format(it) }.take(16))
-}
-
-private fun targetsKey(acctNo: String) = accountKey("targets_", acctNo)
-
-private fun cashKey(acctNo: String) = accountKey("cash_", acctNo)
-
-/** 저장값이 깨져도 화면이 죽지 않는다 — 지정이 없는 것으로 본다. */
-private fun readCashCodes(
-    prefs: Preferences,
-    key: Preferences.Key<String>,
-): Set<String> = runCatching { Json.decodeFromString<Set<String>>(prefs[key] ?: "[]") }.getOrDefault(emptySet())
-
-/** 저장값이 깨졌거나 범위를 벗어나도 화면이 죽지 않는다. */
-private fun readTargets(
-    prefs: Preferences,
-    key: Preferences.Key<String>,
-): Map<String, Int> =
-    runCatching { Json.decodeFromString<Map<String, Int>>(prefs[key] ?: "{}") }
-        .getOrDefault(emptyMap())
-        .filterValues { it in 0..FULL_BP }
 
 @Composable
 fun PortfolioScreen(

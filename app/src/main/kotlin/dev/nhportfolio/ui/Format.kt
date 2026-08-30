@@ -116,3 +116,19 @@ fun Throwable.userMessage(): String =
             "오류가 발생했습니다"
         }
     }
+
+/** 계좌 구성 파이의 조각 색과, 그에 맞는 라벨 글자색. */
+data class CompositionColors(
+    val stock: Color,
+    val cash: Color,
+    val stockInk: Color,
+    val cashInk: Color,
+)
+
+@Composable
+fun compositionColors(): CompositionColors =
+    if (onDark()) {
+        CompositionColors(StockIndigoDark, CashAmberDark, StockIndigoDark, CashAmberDark)
+    } else {
+        CompositionColors(StockIndigo, CashAmber, StockIndigoInk, CashAmberInk)
+    }
