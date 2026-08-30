@@ -2,7 +2,6 @@ package dev.nhportfolio.portfolio
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,7 @@ import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
 import dev.nhportfolio.ui.BackIcon
+import dev.nhportfolio.ui.CloseIcon
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
@@ -305,18 +307,29 @@ fun PortfolioScreen(
         }
     }
 
+    // 고를 수 있는 종목과 유효한 선택. 예수금은 비례 조정 경로를 타므로 빠진다.
+    // 잔고가 갱신되어 사라진 종목이 selected 에 남아도 유령이 개수·일괄 조작에 끼지 않는다.
+    val selectable =
+        ui.plan
+            ?.lines
+            .orEmpty()
+            .filter { it.code != Rebalance.CASH }
+            .map { it.code }
+    val selectedCodes = selected intersect selectable.toSet()
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { BackIcon() }
-                },
-                actions = {
-                    IconButton(onClick = vm::refresh) { RefreshIcon() }
-                },
+            PortfolioTopBar(
+                acctNo = acctNo,
+                selecting = selecting,
+                selectedCodes = selectedCodes,
+                selectable = selectable,
+                onBack = onBack,
+                onRefresh = vm::refresh,
+                onSelectedChange = { selected = it },
+                onExit = exitSelection,
             )
         },
     ) { padding ->
@@ -350,7 +363,6 @@ fun PortfolioScreen(
                             )
                         }
                         SummaryCard(plan, ui.cashAssets, balance.holdings.size) { vm.normalizeTargets() }
-                        SelectAllBar(plan, selecting, selected) { selected = it }
                         HoldingsList(
                             balance = balance,
                             plan = plan,
@@ -367,12 +379,11 @@ fun PortfolioScreen(
                             },
                             modifier = Modifier.weight(1f),
                         )
-                        if (selected.isNotEmpty()) {
+                        if (selecting) {
                             BatchBar(
-                                count = selected.size,
-                                onClear = { selected = emptySet() },
+                                enabled = selectedCodes.isNotEmpty(),
                                 onClearTargets = { confirmClear = true },
-                                onSet = { editing = selected.toList() to null },
+                                onSet = { editing = selectedCodes.toList() to null },
                             )
                         }
                     }
@@ -382,10 +393,10 @@ fun PortfolioScreen(
     }
 
     ClearTargetsDialog(
-        count = selected.size.takeIf { confirmClear },
+        count = selectedCodes.size.takeIf { confirmClear },
         onDismiss = { confirmClear = false },
         onConfirm = {
-            vm.setTargets(selected.toList(), null)
+            vm.setTargets(selectedCodes.toList(), null)
             confirmClear = false
             exitSelection()
         },
@@ -407,6 +418,46 @@ fun PortfolioScreen(
                 if (single != null) vm.setTarget(single, bp) else vm.setTargets(codes, bp)
                 editing = null
                 exitSelection()
+            },
+        )
+    }
+}
+
+/**
+ * 화면 상단바. 선택 모드 여부로 계좌번호 상단바와 선택 상단바를 갈아 낀다.
+ *
+ * [PortfolioScreen] 의 순환 복잡도를 낮추려고 분기를 이리로 뺐다 — 판단 자체는 그대로다.
+ */
+@Composable
+private fun PortfolioTopBar(
+    acctNo: String,
+    selecting: Boolean,
+    selectedCodes: Set<String>,
+    selectable: List<String>,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onSelectedChange: (Set<String>) -> Unit,
+    onExit: () -> Unit,
+) {
+    if (selecting) {
+        SelectionTopBar(
+            count = selectedCodes.size,
+            allSelected = selectable.isNotEmpty() && selectedCodes.size == selectable.size,
+            anySelected = selectedCodes.isNotEmpty(),
+            hasSelectable = selectable.isNotEmpty(),
+            onToggleAll = {
+                onSelectedChange(if (selectedCodes.size == selectable.size) emptySet() else selectable.toSet())
+            },
+            onExit = onExit,
+        )
+    } else {
+        TopAppBar(
+            title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
+            navigationIcon = {
+                IconButton(onClick = onBack) { BackIcon() }
+            },
+            actions = {
+                IconButton(onClick = onRefresh) { RefreshIcon() }
             },
         )
     }
@@ -445,73 +496,63 @@ private fun TargetEditor(
 }
 
 /**
- * 선택 모드 머리줄. 전체 선택·해제와 현재 선택 수를 보여준다.
+ * 선택 모드 상단바. 계좌번호 대신 선택 개수를 걸고, 뒤로가기 자리를 나가기가 아니라 선택 취소로 바꾼다.
  *
- * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다 —
- * 체크박스 관례를 그대로 따른다. 예수금은 [total] 에서 빠져 있다(비례 조정 경로를 타야 한다).
+ * 뒤로 화살표를 그대로 두면 "어디로 돌아가는지" 가 모호해진다 — 선택을 끝내는 X 로 갈라 쓴다.
+ * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다.
  */
 @Composable
-private fun SelectAllBar(
-    plan: Rebalance.Plan,
-    selecting: Boolean,
-    selected: Set<String>,
-    onSelectedChange: (Set<String>) -> Unit,
+private fun SelectionTopBar(
+    count: Int,
+    allSelected: Boolean,
+    anySelected: Boolean,
+    hasSelectable: Boolean,
+    onToggleAll: () -> Unit,
+    onExit: () -> Unit,
 ) {
-    if (!selecting) return
-    val selectable = remember(plan) { plan.lines.filter { it.code != Rebalance.CASH }.map { it.code } }
-    // 잔고가 바뀌어 사라진 종목은 선택에서 뺀다 — 없는 종목에 목표를 쓰면 합계만 어긋나고
-    // 화면 어디에도 보이지 않는다.
-    val stale = selected - selectable.toSet()
-    if (stale.isNotEmpty()) onSelectedChange(selected - stale)
-
-    val total = selectable.size
-    val selectedCount = selectable.count { it in selected }
-    val onToggleAll = { onSelectedChange(if (total > 0 && selectedCount == total) emptySet() else selectable.toSet()) }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = total > 0, onClick = onToggleAll)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TriStateCheckbox(
-            state =
-                when {
-                    total > 0 && selectedCount == total -> ToggleableState.On
-                    selectedCount == 0 -> ToggleableState.Off
-                    else -> ToggleableState.Indeterminate
-                },
-            onClick = onToggleAll,
-            enabled = total > 0,
-        )
-        Text("전체 선택", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.weight(1f))
-        Text("$selectedCount / $total", style = MaterialTheme.typography.bodySmall)
-    }
-    HorizontalDivider()
+    TopAppBar(
+        title = { Text("${count}개 선택", style = MaterialTheme.typography.titleSmall) },
+        navigationIcon = {
+            IconButton(onClick = onExit) {
+                CloseIcon(modifier = Modifier.semantics { contentDescription = "선택 취소" })
+            }
+        },
+        actions = {
+            TriStateCheckbox(
+                state =
+                    when {
+                        allSelected -> ToggleableState.On
+                        anySelected -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
+                    },
+                onClick = onToggleAll,
+                enabled = hasSelectable,
+                modifier = Modifier.semantics { contentDescription = "전체 선택" },
+            )
+        },
+    )
 }
 
-/** 여러 종목을 고른 동안만 뜨는 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다. */
+/**
+ * 선택 모드 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다.
+ *
+ * 아무것도 안 골랐을 때 버튼을 숨기지 않고 흐리게 남긴다 — 사라지면 무엇이 가능한지 알 수 없다.
+ * 개수와 선택 취소는 상단바가 맡는다(한 화면에 같은 숫자를 두 번 쓰지 않는다).
+ */
 @Composable
 private fun BatchBar(
-    count: Int,
-    onClear: () -> Unit,
+    enabled: Boolean,
     onClearTargets: () -> Unit,
     onSet: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("${count}개 선택", style = MaterialTheme.typography.bodyMedium)
-            Row {
-                // "해제" 는 선택 해제인지 목표 해제인지 헷갈린다 — 둘을 또렷이 갈라 쓴다.
-                TextButton(onClick = onClear) { Text("선택 취소") }
-                TextButton(onClick = onClearTargets) { Text("목표 지우기") }
-                TextButton(onClick = onSet) { Text("목표 설정") }
-            }
+            TextButton(enabled = enabled, onClick = onClearTargets) { Text("목표 지우기") }
+            TextButton(enabled = enabled, onClick = onSet) { Text("목표 설정") }
         }
     }
 }

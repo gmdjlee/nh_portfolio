@@ -122,3 +122,23 @@ fun SettingsIcon(
         }
     }
 }
+
+/** 닫기 — 선택 모드를 끝내는 X. */
+@Composable
+fun CloseIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = DEFAULT_SIZE,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Canvas(modifier.size(size)) {
+        val s = this.size.minDimension / GRID
+        val path =
+            Path().apply {
+                moveTo(6f * s, 6f * s)
+                lineTo(18f * s, 18f * s)
+                moveTo(18f * s, 6f * s)
+                lineTo(6f * s, 18f * s)
+            }
+        drawPath(path, tint, style = strokeStyle(s))
+    }
+}
