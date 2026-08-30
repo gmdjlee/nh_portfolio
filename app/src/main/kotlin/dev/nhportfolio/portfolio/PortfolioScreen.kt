@@ -29,7 +29,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -266,8 +265,8 @@ private fun SummaryCard(plan: Rebalance.Plan) {
                     text =
                         when {
                             sum > FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 를 넘습니다"
-                            sum < FULL_BP -> "목표 합계 ${sum.bpPct()}"
-                            else -> "목표 합계 100.00%"
+                            sum < FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 에 미달합니다"
+                            else -> "목표 합계 ${sum.bpPct()}"
                         },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (sum > FULL_BP) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -312,7 +311,7 @@ private fun HoldingsList(
 ) {
     val byCode = remember(balance) { balance.holdings.associateBy { it.code } }
     LazyColumn(Modifier.fillMaxSize()) {
-        items(plan.lines, key = { it.code }) { line ->
+        items(plan.lines) { line ->
             val holding = byCode[line.code]
             Column(
                 Modifier
