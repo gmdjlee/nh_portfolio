@@ -763,22 +763,22 @@ private fun HoldingRow(
                 Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
-            HoldingDetail(line, holding, rebalanceMode, scaleBp)
+            HoldingDetail(line, holding, scaleBp)
         }
     }
 }
 
-/** 이름·금액 아래 한 줄. 리밸런스 탭이면 목표와 매매 수량, 아니면 보유 명세를 보여준다. */
+/** 이름·금액 아래. 보유 명세와 목표·매매 수량을 함께 보여준다. */
 @Composable
 private fun HoldingDetail(
     line: Rebalance.Line,
     holding: Holding?,
-    rebalanceMode: Boolean,
     scaleBp: Int,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        // 보유 명세는 요구 항목이라 리밸런스 탭에서만 접는다 — 편집할 때는 밀도가 더 값지다.
-        if (!rebalanceMode && holding != null) {
+        // 주식수·평균매입가·현재가·잔고수량은 요구 항목이라 늘 보여준다.
+        // maxLines 를 걸지 않는다 — 폰트 배율이 크면 줄바꿈되지만, 잘라내면 요구 데이터가 사라진다.
+        if (holding != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
