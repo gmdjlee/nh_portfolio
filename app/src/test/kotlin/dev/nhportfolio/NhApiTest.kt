@@ -8,6 +8,7 @@ import dev.nhportfolio.api.NhException
 import dev.nhportfolio.api.loadResult
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.security.Vault
+import dev.nhportfolio.ui.userMessage
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
@@ -140,6 +141,25 @@ class NhApiTest {
                 token.body.contentType
                     .toString()
                     .startsWith("application/x-www-form-urlencoded"),
+            )
+        }
+
+    @Test
+    fun `토큰 발급이 5xx 로 실패해도 화면에는 한국어가 나간다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { json("""{"error":"boom"}""", HttpStatusCode.InternalServerError) }
+
+            val e = assertFailsWith<NhException> { f.api.accounts() }
+
+            // userMessage() 는 매핑되지 않은 코드에서 message 를 그대로 내보낸다(NH 의 한국어
+            // rsp_msg 를 살리기 위한 의도된 동작). 그러니 던지는 쪽이 내부 라벨이 아니라
+            // 한국어를 담아야 한다 — 안 그러면 사용자가 "token" 같은 영어를 보게 된다.
+            assertEquals("HTTP500", e.code)
+            assertTrue(
+                e.userMessage().any { it in '가'..'힣' },
+                "화면에 영어 내부 라벨이 나갔다: ${e.userMessage()}",
             )
         }
 

@@ -234,7 +234,10 @@ class NhApi(
                 // cause 를 붙이지 않는다 — Ktor 타임아웃 메시지에는 appkey 가 담긴 URL 이 들어 있다
                 throw IOException(cause::class.simpleName)
             }
-        if (!response.status.isSuccess()) throw NhException("HTTP${response.status.value}", "token")
+        // 메시지는 그대로 화면에 나갈 수 있다 — 내부 라벨이 아니라 한국어로 쓴다
+        if (!response.status.isSuccess()) {
+            throw NhException("HTTP${response.status.value}", "인증 서버 오류 — 잠시 후 다시 시도하세요")
+        }
         return loadResult { NhJson.decodeFromString<TokenDto>(response.bodyAsText()) }
             .getOrElse { throw NhException("AUTH", "bad token body") }
     }
@@ -289,7 +292,7 @@ class NhApi(
             }
             val parsed =
                 loadResult { NhJson.decodeFromString<NhResponse<A, B>>(response.bodyAsText()) }
-                    .getOrElse { throw NhException("HTTP${response.status.value}", "bad response body") }
+                    .getOrElse { throw NhException("HTTP${response.status.value}", "응답 형식 오류") }
             // 유일한 네트워크 로그. release 에서는 R8 이 제거한다.
             Log.d("NhApi", "$path rsp_cd=${parsed.rspCd} ${parsed.rspMsg}")
             if (parsed.output0 == null && parsed.output1 == null && !parsed.ok) {
