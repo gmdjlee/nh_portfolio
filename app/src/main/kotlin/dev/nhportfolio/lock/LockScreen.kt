@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -126,7 +127,7 @@ class LockViewModel(
     }
 
     fun onBiometricResult(success: Boolean) {
-        if (success) completedChannel.trySend(true) else error = "지문 인증에 실패했습니다"
+        if (success) completedChannel.trySend(true)
     }
 
     override fun onCleared() {
@@ -204,7 +205,7 @@ class LockViewModel(
         entered.fill('0')
         runCatching { vault.setPin(first) } // setPin 이 first 를 지운다
             .onSuccess { completedChannel.trySend(true) }
-            .onFailure { error = it.message ?: "PIN 설정에 실패했습니다" }
+            .onFailure { error = it.userMessage().ifEmpty { "PIN 설정에 실패했습니다" } }
         firstEntry = null
     }
 
@@ -248,7 +249,8 @@ fun PinFlow(
     val canUseBiometric = mode == PinMode.Verify && enrolled && activity != null
 
     LaunchedEffect(mode) { vm.start(mode) }
-    LaunchedEffect(Unit) { vm.completed.collect(onDone) }
+    val currentOnDone by rememberUpdatedState(onDone)
+    LaunchedEffect(Unit) { vm.completed.collect { currentOnDone(it) } }
     // BiometricPrompt 는 컴포저블 스코프에서 띄운다 — viewModelScope 에서 기다리면
     // 회전으로 액티비티가 죽었을 때 영원히 돌아오지 않는다.
     LaunchedEffect(canUseBiometric) {
