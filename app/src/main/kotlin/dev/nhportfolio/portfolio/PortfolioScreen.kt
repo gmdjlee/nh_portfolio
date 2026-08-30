@@ -177,6 +177,14 @@ class PortfolioViewModel(
         }
     }
 
+    /**
+     * 목표 합계를 정확히 100% 로 맞춘다. 예수금 목표가 있으면 그 값은 그대로 두고
+     * 종목만 남은 자리를 채운다 — 사용자가 정한 현금 비중을 말없이 바꾸지 않는다.
+     */
+    fun normalizeTargets() {
+        edit { current -> Rebalance.normalize(current, currentWeightsBp()) }
+    }
+
     /** 마지막으로 계산된 종목별 현재 비중. 아직 잔고를 못 받았으면 비어 있다. */
     private fun currentWeightsBp(): Map<String, Int> =
         ui.value.plan
@@ -288,7 +296,7 @@ fun PortfolioScreen(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             )
                         }
-                        SummaryCard(plan)
+                        SummaryCard(plan) { vm.normalizeTargets() }
                         ModeSelector(rebalanceMode) { rebalanceMode = it }
                         SelectAllBar(plan, rebalanceMode, selected) { selected = it }
                         HoldingsList(
@@ -456,7 +464,10 @@ private fun ClearTargetsDialog(
 }
 
 @Composable
-private fun SummaryCard(plan: Rebalance.Plan) {
+private fun SummaryCard(
+    plan: Rebalance.Plan,
+    onNormalize: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth().padding(16.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("총 평가", style = MaterialTheme.typography.bodySmall)
@@ -465,16 +476,31 @@ private fun SummaryCard(plan: Rebalance.Plan) {
 
             val sum = plan.targetSumBp
             if (sum > 0) {
-                Text(
-                    text =
-                        when {
-                            sum > FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 를 넘습니다"
-                            sum < FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 에 미달합니다"
-                            else -> "목표 합계 ${sum.bpPct()}"
-                        },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (sum > FULL_BP) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text =
+                            when {
+                                sum > FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 를 넘습니다"
+                                sum < FULL_BP -> "목표 합계 ${sum.bpPct()} — 100% 에 미달합니다"
+                                else -> "목표 합계 ${sum.bpPct()}"
+                            },
+                        style = MaterialTheme.typography.bodySmall,
+                        color =
+                            if (sum > FULL_BP) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                    )
+                    // 이미 100% 면 버튼이 할 일이 없다 — 띄우지 않는다.
+                    if (sum != FULL_BP) {
+                        TextButton(onClick = onNormalize) { Text("100%로 맞추기") }
+                    }
+                }
             }
             if (plan.cashAfter < 0) {
                 Text(

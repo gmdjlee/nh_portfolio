@@ -50,21 +50,48 @@ object Rebalance {
         currentWeightsBp: Map<String, Int> = emptyMap(),
     ): Map<String, Int> {
         require(cashBp in 0..FULL_BP) { "목표 비중은 0~100% 범위여야 합니다" }
-        val stocks =
-            (currentWeightsBp.filterKeys { it != CASH } + targetsBp.filterKeys { it != CASH })
-        val sum = stocks.values.sum()
-        if (sum <= 0) return targetsBp + (CASH to cashBp)
+        return scaleStocks(targetsBp, currentWeightsBp, FULL_BP - cashBp) + (CASH to cashBp)
+    }
 
-        val room = (FULL_BP - cashBp).toLong()
+    /**
+     * 목표 합계를 정확히 100% 로 맞춘다. 예수금 목표가 있으면 그 값은 **그대로 두고**
+     * 종목들만 남은 자리를 채운다 — 사용자가 일부러 정한 현금 비중을 말없이 바꾸지 않는다.
+     * 예수금 목표가 없으면 종목만으로 100% 를 채운다.
+     *
+     * 목표가 없는 종목은 [scaleForCash] 와 같이 현재 비중을 출발점으로 삼는다.
+     */
+    fun normalize(
+        targetsBp: Map<String, Int>,
+        currentWeightsBp: Map<String, Int> = emptyMap(),
+    ): Map<String, Int> {
+        val cash = targetsBp[CASH]
+        val scaled = scaleStocks(targetsBp, currentWeightsBp, FULL_BP - (cash ?: 0))
+        return if (cash == null) scaled else scaled + (CASH to cash)
+    }
+
+    /**
+     * 종목 목표들을 합이 정확히 [room] 이 되도록 비례 조정한다. 예수금 행은 건드리지 않는다.
+     * 목표가 없는 종목은 [currentWeightsBp] 의 현재 비중을 출발점으로 삼는다.
+     */
+    private fun scaleStocks(
+        targetsBp: Map<String, Int>,
+        currentWeightsBp: Map<String, Int>,
+        room: Int,
+    ): Map<String, Int> {
+        val stocks = currentWeightsBp.filterKeys { it != CASH } + targetsBp.filterKeys { it != CASH }
+        val sum = stocks.values.sum()
+        if (sum <= 0) return targetsBp.filterKeys { it != CASH }
+
+        val target = room.toLong()
         // 단순 비례하면 정수 절삭 때문에 합이 room 에서 어긋난다. 바닥값을 깔고 남은 몫을
         // 나머지가 큰 순서로 1bp 씩 나눠 준다(최대잉여법) — 합이 항상 정확히 room 이 된다.
-        val scaled = stocks.mapValues { (_, bp) -> (bp * room / sum).toInt() }.toMutableMap()
-        val shortfall = (room - scaled.values.sumOf { it.toLong() }).toInt()
+        val scaled = stocks.mapValues { (_, bp) -> (bp * target / sum).toInt() }.toMutableMap()
+        val shortfall = (target - scaled.values.sumOf { it.toLong() }).toInt()
         stocks.entries
-            .sortedByDescending { (_, bp) -> bp * room % sum }
+            .sortedByDescending { (_, bp) -> bp * target % sum }
             .take(shortfall)
             .forEach { scaled[it.key] = scaled.getValue(it.key) + 1 }
-        return scaled + (CASH to cashBp)
+        return scaled
     }
 
     fun plan(

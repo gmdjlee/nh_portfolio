@@ -8,6 +8,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -279,6 +280,72 @@ class RebalanceTest {
     @Test
     fun `보유도 목표도 없으면 예수금만 설정한다`() {
         assertEquals(mapOf(Rebalance.CASH to 3000), Rebalance.scaleForCash(emptyMap(), cashBp = 3000))
+    }
+
+    // ---- normalize ----
+
+    @Test
+    fun `합계가 모자라면 100 퍼센트로 늘린다`() {
+        val out = Rebalance.normalize(mapOf("A" to 4000, "B" to 2000))
+
+        assertEquals(10_000, out.values.sum())
+        // 2:1 을 10000 에 담으면 6666.67:3333.33 — 합을 정확히 맞추는 쪽이 우선이라 1bp 가 남는다
+        assertTrue(abs(out.getValue("A") - 2 * out.getValue("B")) <= 1, "비율 오차가 1bp 를 넘었다: $out")
+    }
+
+    @Test
+    fun `합계가 넘치면 100 퍼센트로 줄인다`() {
+        val out = Rebalance.normalize(mapOf("A" to 8000, "B" to 8000))
+
+        assertEquals(10_000, out.values.sum())
+        assertEquals(5000, out.getValue("A"))
+        assertEquals(5000, out.getValue("B"))
+    }
+
+    @Test
+    fun `예수금 목표는 그대로 두고 종목만 맞춘다`() {
+        // 사용자가 일부러 정한 현금 비중을 말없이 바꾸면 안 된다
+        val out = Rebalance.normalize(mapOf("A" to 4000, "B" to 2000, Rebalance.CASH to 2500))
+
+        assertEquals(2500, out.getValue(Rebalance.CASH))
+        assertEquals(7500, out.getValue("A") + out.getValue("B"))
+        assertEquals(10_000, out.values.sum())
+    }
+
+    @Test
+    fun `예수금 목표가 없으면 종목만으로 100 퍼센트를 채운다`() {
+        val out = Rebalance.normalize(mapOf("A" to 1000))
+
+        assertEquals(10_000, out.getValue("A"))
+        assertFalse(Rebalance.CASH in out, "없던 예수금 목표를 만들어내면 안 된다: $out")
+    }
+
+    @Test
+    fun `목표가 없어도 현재 비중으로 100 퍼센트를 만든다`() {
+        val out = Rebalance.normalize(emptyMap(), currentWeightsBp = mapOf("A" to 3000, "B" to 1000))
+
+        assertEquals(7500, out.getValue("A"))
+        assertEquals(2500, out.getValue("B"))
+    }
+
+    @Test
+    fun `이미 100 퍼센트면 그대로 둔다`() {
+        val start = mapOf("A" to 6000, "B" to 3000, Rebalance.CASH to 1000)
+        assertEquals(start, Rebalance.normalize(start))
+    }
+
+    @Test
+    fun `무작위 입력에서도 정규화 결과는 정확히 100 퍼센트다`() {
+        val rnd = Random(11)
+        repeat(200) {
+            val stocks = List(rnd.nextInt(1, 8)) { i -> "C$i" to rnd.nextInt(0, 4000) }.toMap()
+            val targets = if (rnd.nextBoolean()) stocks + (Rebalance.CASH to rnd.nextInt(0, 5000)) else stocks
+            if (stocks.values.sum() > 0) {
+                val out = Rebalance.normalize(targets)
+                assertEquals(10_000, out.values.sum(), "targets=$targets -> $out")
+                assertTrue(out.values.all { it >= 0 }, "음수 비중: $out")
+            }
+        }
     }
 
     @Test
