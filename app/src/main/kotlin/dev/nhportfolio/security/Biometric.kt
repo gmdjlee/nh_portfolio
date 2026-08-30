@@ -11,6 +11,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -42,7 +43,10 @@ class Biometric(
     val enrolled: Flow<Boolean> = store.data.map { K.DEK_BIO in it }
 
     /** 잠금이 풀린 상태에서만 호출한다(UI 는 PIN 재검증 후 호출). 실패해도 예외 대신 false. */
-    suspend fun enroll(activity: FragmentActivity): Boolean = runCatching { enrollInner(activity) }.getOrDefault(false)
+    suspend fun enroll(activity: FragmentActivity): Boolean =
+        runCatching { enrollInner(activity) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrDefault(false)
 
     private suspend fun enrollInner(activity: FragmentActivity): Boolean {
         val dek = vault.dek() ?: return false
@@ -58,7 +62,10 @@ class Biometric(
         return true
     }
 
-    suspend fun unlock(activity: FragmentActivity): Boolean = runCatching { unlockInner(activity) }.getOrDefault(false)
+    suspend fun unlock(activity: FragmentActivity): Boolean =
+        runCatching { unlockInner(activity) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrDefault(false)
 
     private suspend fun unlockInner(activity: FragmentActivity): Boolean {
         val blob = (store.data.first()[K.DEK_BIO] ?: return false).unb64()
@@ -85,6 +92,7 @@ class Biometric(
 
     suspend fun disable() {
         runCatching { store.edit { it.remove(K.DEK_BIO) } }
+            .onFailure { if (it is CancellationException) throw it }
     }
 
     /** 인증 성공이면 인증된 [Cipher], 취소·실패면 null. */
