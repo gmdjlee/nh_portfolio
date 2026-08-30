@@ -1,11 +1,10 @@
-@file:Suppress("MatchingDeclarationName")
-
 package dev.nhportfolio.accounts
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,29 +38,6 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import org.koin.androidx.compose.koinViewModel
-
-class AccountsViewModel(
-    vault: Vault,
-    api: NhApi,
-) : ViewModel() {
-    private val kick = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-
-    /** null = 아직 로딩 중. 앱 키가 바뀌면 자동으로 다시 조회한다. */
-    val ui: StateFlow<Result<List<Account>>?> =
-        merge(
-            vault.secretsFlow
-                .map { it.appKey }
-                .filterNotNull()
-                .distinctUntilChanged()
-                .map { },
-            kick,
-        ).mapLatest { loadResult { api.accounts() } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    fun retry() {
-        kick.tryEmit(Unit)
-    }
-}
 
 @Composable
 fun AccountsScreen(
@@ -100,12 +76,13 @@ fun AccountsScreen(
                 }
 
                 else -> {
+                    val accounts = result.getOrThrow()
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(result.getOrThrow(), key = { it.no }) { account ->
+                        items(accounts, key = { it.no }) { account ->
                             Card(
                                 modifier =
                                     Modifier
-                                        .fillMaxSize()
+                                        .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                         .clickable { onOpen(account.no) },
                             ) {
@@ -120,5 +97,28 @@ fun AccountsScreen(
                 }
             }
         }
+    }
+}
+
+class AccountsViewModel(
+    vault: Vault,
+    api: NhApi,
+) : ViewModel() {
+    private val kick = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** null = 아직 로딩 중. 앱 키가 바뀌면 자동으로 다시 조회한다. */
+    val ui: StateFlow<Result<List<Account>>?> =
+        merge(
+            vault.secretsFlow
+                .map { it.appKey }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .map { },
+            kick,
+        ).mapLatest { loadResult { api.accounts() } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun retry() {
+        kick.tryEmit(Unit)
     }
 }
