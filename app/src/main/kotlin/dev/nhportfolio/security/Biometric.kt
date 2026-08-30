@@ -52,6 +52,9 @@ class Biometric(
         val dek = vault.dek() ?: return false
         val cipher =
             runCatching {
+                // 키를 새로 만들면 기존 DEK_BIO 봉인은 더 이상 못 연다 — 같은 자리에서 지운다
+                // (취소된 등록이 "지문 켜짐" 인데 doFinal 은 영원히 실패하는 상태로 남지 않도록).
+                store.edit { it.remove(K.DEK_BIO) }
                 val key = generateBioKey()
                 Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
             }.getOrNull() ?: return false

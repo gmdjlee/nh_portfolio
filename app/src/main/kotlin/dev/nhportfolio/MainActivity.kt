@@ -34,7 +34,6 @@ import dev.nhportfolio.security.Vault
 import dev.nhportfolio.settings.SettingsScreen
 import dev.nhportfolio.ui.NhTheme
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.koinViewModel
@@ -94,19 +93,24 @@ private fun AppNav() {
     // "키 없음" 화면이 잘못 잠깐 보이는 걸 막는다.
     val hasKeys =
         key(unlocked) {
-            remember { vault.secretsFlow.map { it.appKey != null }.catch { corrupt = true } }
+            remember { vault.hasKeys.catch { corrupt = true } }
                 .collectAsStateWithLifecycle(null)
                 .value
         }
 
-    // 잠금 상태로 돌아올 때마다 지문 자동 프롬프트 억제 플래그를 푼다. PinFlow 의
+    // 잠금 상태로 돌아올 때마다 지문 자동 프롬프트 억제 플래그를 풀고, 설정 화면이 띄워둔 PIN
+    // 확인 요청도 같이 지운다 — 안 그러면 설정에서 PIN 확인이 뜬 채로 자동 잠금을 맞고 PIN 으로
+    // 다시 풀었을 때, 이미 목적을 잃은 PIN 요청이 되살아나 두 번째 PIN 화면으로 보인다. PinFlow 의
     // LaunchedEffect(mode) 는 회전에도 재실행되므로 start() 안에서 풀면 회전마다 생체 인증이
     // 다시 뜬다 — 그런데 회전은 (configChanges 를 안 걸었으므로) 액티비티를 통째로 다시 만들어서
     // 이 LaunchedEffect 도 새로 시작된다. "잠긴 채로 회전"과 "풀렸다가 다시 잠김" 을 구분하려면
     // 회전에도 살아남는 rememberSaveable 로 직전 unlocked 값을 들고 있어야 한다.
     var wasUnlocked by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(unlocked) {
-        if (wasUnlocked && !unlocked) lockVm.promptedBiometric = false
+        if (wasUnlocked && !unlocked) {
+            lockVm.promptedBiometric = false
+            pinRequest = null
+        }
         wasUnlocked = unlocked
     }
 

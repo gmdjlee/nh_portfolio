@@ -31,6 +31,7 @@ import dev.nhportfolio.ui.userMessage
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
@@ -66,7 +67,7 @@ fun AccountsScreen(
 
                 result.isFailure -> {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(result.exceptionOrNull()!!.userMessage())
+                        Text(result.exceptionOrNull()?.userMessage().orEmpty())
                         TextButton(onClick = vm::retry) { Text("다시 시도") }
                     }
                 }
@@ -113,7 +114,8 @@ class AccountsViewModel(
                 .map { it.appKey }
                 .filterNotNull()
                 .distinctUntilChanged()
-                .map { },
+                .map { }
+                .catch { }, // store 손상 등으로 죽어도 재조회 트리거가 하나 준 것뿐 — kick(수동 재시도)은 살아있다
             kick,
         ).mapLatest { loadResult { api.accounts() } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

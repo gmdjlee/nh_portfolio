@@ -216,6 +216,9 @@ class Vault(
             }
         }
 
+    /** 앱 키 저장 여부. 게이트 화면과 설정 화면이 같은 판정을 공유한다. */
+    val hasKeys: Flow<Boolean> = secretsFlow.map { it.appKey != null }.distinctUntilChanged()
+
     suspend fun secrets(): Secrets = decode(store.data.first())
 
     suspend fun update(transform: (Secrets) -> Secrets) {

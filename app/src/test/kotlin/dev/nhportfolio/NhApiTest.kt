@@ -301,6 +301,24 @@ class NhApiTest {
         }
 
     @Test
+    fun `완료를 부정하는 메시지는 성공으로 보지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    json("""{"rsp_cd":"90001","rsp_msg":"조회가 완료되지 않았습니다"}""")
+                }
+            }
+
+            val e = assertFailsWith<NhException> { f.api.balance(Account("20101036881")) }
+            assertEquals("90001", e.code)
+            assertEquals("조회가 완료되지 않았습니다", e.message)
+        }
+
+    @Test
     fun `블록이 없어도 완료 메시지면 빈 결과다`() =
         runTest {
             val f = ApiFixture()

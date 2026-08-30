@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
@@ -114,7 +115,7 @@ class PortfolioViewModel(
     val ui: StateFlow<PortfolioUi> =
         combine(
             loads,
-            store.data.map { readTargets(it, targetsKey) },
+            store.data.map { readTargets(it, targetsKey) }.catch { },
             lastFill,
         ) { (balance, error), targets, fill ->
             PortfolioUi(balance, balance?.let { Rebalance.plan(it, targets) }, fill, error)
@@ -122,6 +123,11 @@ class PortfolioViewModel(
 
     fun refresh() {
         kick.tryEmit(Unit)
+    }
+
+    /** 스낵바로 보여준 체결을 소비한다 — 안 그러면 화면 재진입(잠금 해제·뒤로가기)마다 다시 뜬다. */
+    fun consumeFill() {
+        lastFill.value = null
     }
 
     /** [bp] 가 null 이면 목표를 지운다. 범위 밖 값은 호출 전에 걸러진다. */
@@ -140,7 +146,7 @@ class PortfolioViewModel(
     }
 }
 
-/** 계좌번호를 평문으로 디스크에 쓰지 않는다. */
+/** 계좌번호를 키 이름으로 노출하지 않는다 — 목표값 자체는 평문이다. */
 private fun targetsKey(acctNo: String): Preferences.Key<String> {
     val digest = MessageDigest.getInstance("SHA-256").digest(acctNo.toByteArray())
     return stringPreferencesKey("targets_" + digest.joinToString("") { "%02x".format(it) }.take(16))
@@ -171,10 +177,14 @@ fun PortfolioScreen(
         ui.lastFill?.let { fill ->
             val at =
                 fill.time
-                    .take(4)
-                    .chunked(2)
-                    .joinToString(":")
-            snackbar.showSnackbar("${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()} ($at)")
+                    .takeIf { it.length >= 4 }
+                    ?.take(4)
+                    ?.chunked(2)
+                    ?.joinToString(":")
+                    ?.let { " ($it)" }
+                    .orEmpty()
+            snackbar.showSnackbar("${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at")
+            vm.consumeFill()
         }
     }
 

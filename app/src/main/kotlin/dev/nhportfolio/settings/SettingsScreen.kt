@@ -43,7 +43,6 @@ import dev.nhportfolio.ui.userMessage
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
@@ -56,19 +55,16 @@ class SettingsViewModel(
     private val biometric: Biometric,
 ) : ViewModel() {
     val hasKeys: StateFlow<Boolean?> =
-        vault.secretsFlow
-            .map { it.appKey != null }
+        vault.hasKeys
             .catch { emit(false) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val bioEnrolled: StateFlow<Boolean> =
+    val bioEnrolled: StateFlow<Boolean?> =
         biometric.enrolled
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+            .catch { emit(false) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     var error by mutableStateOf<String?>(null)
-        private set
-
-    var saved by mutableStateOf(false)
         private set
 
     /**
@@ -106,7 +102,6 @@ class SettingsViewModel(
                 }
             }.onSuccess {
                 error = null
-                saved = true
             }.onFailure {
                 error = it.userMessage().ifEmpty { "저장하지 못했습니다" }
             }
@@ -218,7 +213,8 @@ fun SettingsScreen(
                     headlineContent = { Text("지문으로 잠금 해제") },
                     trailingContent = {
                         Switch(
-                            checked = bioEnrolled,
+                            checked = bioEnrolled == true,
+                            enabled = bioEnrolled != null,
                             onCheckedChange = { enable ->
                                 if (enable) {
                                     requestPin(PinMode.Verify) { ok -> if (ok) vm.enrollBiometric(activity) }

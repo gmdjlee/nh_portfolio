@@ -99,9 +99,12 @@ data class NhResponse<A, B>(
 )
 
 private val OK_CODES = setOf("00000", "00166", "00221", "13578")
+private val NOT_OK = listOf("않", "못", "미완료")
 
-/** 정상 코드는 여러 개이고 API 마다 다르다 — 코드 집합 ∪ 메시지로 판정한다. */
-val NhResponse<*, *>.ok: Boolean get() = rspCd in OK_CODES || "완료" in rspMsg
+/** 정상 코드는 여러 개이고 API 마다 다르다 — 코드 집합 ∪ 메시지로 판정한다.
+ *  메시지 판정은 부정 표현을 걸러낸다 — "완료되지 않았습니다" 도 "완료" 를 포함한다. */
+val NhResponse<*, *>.ok: Boolean
+    get() = rspCd in OK_CODES || ("완료" in rspMsg && NOT_OK.none { it in rspMsg })
 
 /**
  * 블록이 있으면 성공, 없으면 [ok] 일 때만 [empty], 아니면 업무 오류.
