@@ -165,6 +165,48 @@ class RebalanceTest {
         }
     }
 
+    // ---- 평가손익 ----
+
+    @Test
+    fun `평가손익은 평가금액에서 매입원가를 뺀 값이다`() {
+        // 10주 × 평균 1,000 = 원가 10,000, 평가 12,000 -> +2,000 (+20%)
+        val b = Balance(cash = 0, holdings = listOf(holding("A", 10, 1_200, evalAmt = 12_000).copy(avgPrice = 1_000)))
+        val plan = Rebalance.plan(b, emptyMap())
+
+        assertEquals(2_000, plan.totalPl)
+        assertEquals(20.0, plan.totalPlRate)
+    }
+
+    @Test
+    fun `현금은 손익 계산에 들어가지 않는다`() {
+        // 현금을 원가에 넣으면 수익률이 희석된다 — 같은 종목이면 현금이 얼마든 수익률은 같아야 한다.
+        val h = listOf(holding("A", 10, 1_200, evalAmt = 12_000).copy(avgPrice = 1_000))
+        val poor = Rebalance.plan(Balance(cash = 0, holdings = h), emptyMap())
+        val rich = Rebalance.plan(Balance(cash = 90_000_000, holdings = h), emptyMap())
+
+        assertEquals(poor.totalPl, rich.totalPl)
+        assertEquals(poor.totalPlRate, rich.totalPlRate)
+    }
+
+    @Test
+    fun `손실이면 음수로 나온다`() {
+        val b = Balance(cash = 0, holdings = listOf(holding("A", 10, 800, evalAmt = 8_000).copy(avgPrice = 1_000)))
+        val plan = Rebalance.plan(b, emptyMap())
+
+        assertEquals(-2_000, plan.totalPl)
+        assertEquals(-20.0, plan.totalPlRate)
+    }
+
+    @Test
+    fun `원가가 0 이면 수익률은 0 이다`() {
+        // 0 으로 나누면 안 된다 — 무상주처럼 원가가 없는 경우가 실제로 있다.
+        val b = Balance(cash = 1_000, holdings = listOf(holding("A", 10, 500, evalAmt = 5_000).copy(avgPrice = 0)))
+        val plan = Rebalance.plan(b, emptyMap())
+
+        assertEquals(5_000, plan.totalPl)
+        assertEquals(0.0, plan.totalPlRate)
+    }
+
     // ---- foldCash ----
 
     @Test

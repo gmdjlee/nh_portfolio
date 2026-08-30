@@ -22,12 +22,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -60,6 +58,8 @@ import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
+import dev.nhportfolio.ui.BackIcon
+import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
 import dev.nhportfolio.ui.deltaChipColors
@@ -325,9 +325,13 @@ fun PortfolioScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text(acctNo) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("뒤로") } },
-                actions = { TextButton(onClick = vm::refresh) { Text("새로고침") } },
+                title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { BackIcon() }
+                },
+                actions = {
+                    IconButton(onClick = vm::refresh) { RefreshIcon() }
+                },
             )
         },
     ) { padding ->
@@ -361,8 +365,9 @@ fun PortfolioScreen(
                             )
                         }
                         SummaryCard(plan, ui.cashAssets) { vm.normalizeTargets() }
-                        ModeSelector(rebalanceMode) { rebalanceMode = it }
+                        ModeSelector(rebalanceMode, balance.holdings.size) { rebalanceMode = it }
                         SelectAllBar(plan, rebalanceMode, selected) { selected = it }
+                        ColumnHeader()
                         HoldingsList(
                             balance = balance,
                             plan = plan,
@@ -564,6 +569,14 @@ private fun SummaryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(plan.total.krw(), style = MaterialTheme.typography.displaySmall)
+            // 총액 바로 아래 평가손익 — 계좌를 열었을 때 두 번째로 찾는 숫자다.
+            if (plan.totalPl != 0L) {
+                Text(
+                    "${if (plan.totalPl > 0) "+" else ""}${plan.totalPl.krw()} (${plan.totalPlRate.pct()})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = plColor(plan.totalPlRate),
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatBox(
@@ -587,42 +600,48 @@ private fun SummaryCard(
                 modifier = Modifier.weight(1f),
             )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val sum = plan.targetSumBp
-            // 정확히 100% 면 경고도 버튼도 없다 — 합계 자체는 위 StatBox 가 이미 보여준다.
-            if (sum > 0 && sum != FULL_BP) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text =
-                            when {
-                                sum > FULL_BP -> "100% 를 넘습니다"
-                                else -> "100% 에 미달합니다"
-                            },
-                        style = MaterialTheme.typography.bodySmall,
-                        color =
-                            if (sum > FULL_BP) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                    )
-                    // 이미 100% 면 버튼이 할 일이 없다 — 띄우지 않는다.
-                    if (sum != FULL_BP) {
-                        TextButton(onClick = onNormalize) { Text("100%로 맞추기") }
-                    }
-                }
-            }
-            if (plan.cashAfter < 0) {
+        PlanWarnings(plan, onNormalize)
+    }
+}
+
+/** 목표 합계가 100% 가 아니거나 예수금이 모자랄 때만 뜨는 안내. 평소에는 아무것도 그리지 않는다. */
+@Composable
+private fun PlanWarnings(
+    plan: Rebalance.Plan,
+    onNormalize: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val sum = plan.targetSumBp
+        // 정확히 100% 면 경고도 버튼도 없다 — 합계 자체는 위 StatBox 가 이미 보여준다.
+        if (sum > 0 && sum != FULL_BP) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "매매 후 예수금 ${plan.cashAfter.krw()} — 예수금이 부족합니다",
+                    text =
+                        when {
+                            sum > FULL_BP -> "100% 를 넘습니다"
+                            else -> "100% 에 미달합니다"
+                        },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color =
+                        if (sum > FULL_BP) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                 )
+                TextButton(onClick = onNormalize) { Text("100%로 맞추기") }
             }
+        }
+        if (plan.cashAfter < 0) {
+            Text(
+                "매매 후 예수금 ${plan.cashAfter.krw()} — 예수금이 부족합니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -648,19 +667,72 @@ private fun StatBox(
 @Composable
 private fun ModeSelector(
     rebalanceMode: Boolean,
+    holdingCount: Int,
     onChange: (Boolean) -> Unit,
 ) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        SegmentedButton(
-            selected = !rebalanceMode,
-            onClick = { onChange(false) },
-            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-        ) { Text("보유") }
-        SegmentedButton(
-            selected = rebalanceMode,
-            onClick = { onChange(true) },
-            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-        ) { Text("리밸런스") }
+    // 알약 세그먼트 대신 밑줄 탭 — 테두리가 사라지는 만큼 표에 자리가 남고, 상용 증권앱의 관례다.
+    Column {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                ModeTab("보유", !rebalanceMode) { onChange(false) }
+                ModeTab("리밸런스", rebalanceMode) { onChange(true) }
+            }
+            Text(
+                "${holdingCount}종목",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun ModeTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier.clickable(onClick = onClick).padding(top = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(2.5.dp)
+                .background(if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent),
+        )
+    }
+}
+
+/** 표 머리줄. 어느 열이 무엇인지 한 번만 말해 주면 아래 행들이 라벨 없이 숫자만 보여줄 수 있다. */
+@Composable
+private fun ColumnHeader() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("종목 · 보유", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "평가금액 · 수익률 · 비중",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
