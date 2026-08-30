@@ -94,6 +94,28 @@ object Rebalance {
         return scaled
     }
 
+    /**
+     * [cashCodes] 로 지정한 종목을 현금에 합치고 보유 목록에서 뺀다.
+     *
+     * NH 는 CMA 발행어음 같은 현금성 상품도 잔고의 보유 종목(Output_1)으로 내려준다 —
+     * balance 응답의 요약 블록에는 예수금 계열밖에 없다. 그대로 두면 주식처럼 취급되어
+     * 매수/매도 수량이 계산되고 자산 비중도 주식으로 잡힌다.
+     *
+     * 종목코드를 앱이 넘겨짚지 않는다. 무엇이 현금성인지는 사용자가 정한다 — 잘못 짚으면
+     * 진짜 주식이 매매 계획에서 빠지고 현금만 부풀려진다.
+     *
+     * [Rebalance.plan] 보다 **먼저** 적용해야 분모·비중·목표·매매 수량이 모두 같은 기준을 쓴다.
+     */
+    fun foldCash(
+        balance: Balance,
+        cashCodes: Set<String>,
+    ): Balance {
+        if (cashCodes.isEmpty()) return balance
+        val (cashLike, rest) = balance.holdings.partition { it.code in cashCodes }
+        if (cashLike.isEmpty()) return balance
+        return Balance(cash = balance.cash + cashLike.sumOf { it.evalAmt }, holdings = rest)
+    }
+
     fun plan(
         balance: Balance,
         targetsBp: Map<String, Int>,

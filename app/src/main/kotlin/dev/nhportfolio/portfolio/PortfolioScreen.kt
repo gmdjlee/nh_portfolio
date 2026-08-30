@@ -83,6 +83,13 @@ import java.security.MessageDigest
 import kotlin.math.roundToInt
 
 private const val FILL_DEBOUNCE_MS = 300L
+
+/** 다이얼로그의 현금성 자산 토글. null 이면 그 자리에 아무것도 그리지 않는다. */
+private data class CashToggle(
+    val isCash: Boolean,
+    val onClick: () -> Unit,
+)
+
 private const val FULL_BP = 10_000
 private val TARGET_INPUT = Regex("""^\d{1,3}(\.\d{1,2})?$""")
 
@@ -92,6 +99,9 @@ data class PortfolioUi(
     val plan: Rebalance.Plan? = null,
     val lastFill: Fill? = null,
     val error: String? = null,
+    /** 현금 행에 합쳐진 현금성 자산 개수. 0 이면 순수 예수금이다. */
+    val cashAssets: Int = 0,
+    val cashCodes: Set<String> = emptySet(),
 )
 
 class PortfolioViewModel(
@@ -101,6 +111,7 @@ class PortfolioViewModel(
 ) : ViewModel() {
     private val account = Account(acctNo)
     private val targetsKey = targetsKey(acctNo)
+    private val cashKey = cashKey(acctNo)
     private val kick = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val lastFill = MutableStateFlow<Fill?>(null)
 
@@ -122,9 +133,19 @@ class PortfolioViewModel(
         combine(
             loads,
             store.data.map { readTargets(it, targetsKey) }.catch { },
+            store.data.map { readCashCodes(it, cashKey) }.catch { },
             lastFill,
-        ) { (balance, error), targets, fill ->
-            PortfolioUi(balance, balance?.let { Rebalance.plan(it, targets) }, fill, error)
+        ) { (balance, error), targets, cashCodes, fill ->
+            // 현금성 자산을 먼저 접어야 분모·비중·목표·매매 수량이 모두 같은 기준을 쓴다.
+            val folded = balance?.let { Rebalance.foldCash(it, cashCodes) }
+            PortfolioUi(
+                balance = folded,
+                plan = folded?.let { Rebalance.plan(it, targets) },
+                lastFill = fill,
+                error = error,
+                cashAssets = balance?.holdings.orEmpty().count { it.code in cashCodes },
+                cashCodes = cashCodes,
+            )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
     fun refresh() {
@@ -185,6 +206,24 @@ class PortfolioViewModel(
         edit { current -> Rebalance.normalize(current, currentWeightsBp()) }
     }
 
+    /**
+     * 종목을 현금성 자산으로 묶거나 되돌린다. 묶으면 평가금액이 현금에 합쳐지고
+     * 보유 목록에서 빠지므로, 남아 있던 목표 비중도 함께 지운다 — 목록에 없는 종목의
+     * 목표가 남으면 합계만 어긋나고 화면 어디에도 보이지 않는다.
+     */
+    fun toggleCashAsset(code: String) {
+        viewModelScope.launch {
+            store.edit { prefs ->
+                val current = readCashCodes(prefs, cashKey)
+                val next = if (code in current) current - code else current + code
+                prefs[cashKey] = Json.encodeToString(next)
+                if (code !in current) {
+                    prefs[targetsKey] = Json.encodeToString(readTargets(prefs, targetsKey) - code)
+                }
+            }
+        }
+    }
+
     /** 마지막으로 계산된 종목별 현재 비중. 아직 잔고를 못 받았으면 비어 있다. */
     private fun currentWeightsBp(): Map<String, Int> =
         ui.value.plan
@@ -202,6 +241,9 @@ class PortfolioViewModel(
     }
 }
 
+/** 현금성 자산이 합쳐졌으면 "예수금" 이 아니라 "현금" 이다 — 이름이 내용과 어긋나면 안 된다. */
+private fun cashLabel(cashAssets: Int): String = if (cashAssets > 0) "현금" else "예수금"
+
 /** 체결 스낵바 문구. `conctime` 이 비었거나 짧으면 괄호째 생략한다 — "()" 만 남으면 흉하다. */
 private fun fillMessage(fill: Fill): String {
     val at =
@@ -215,11 +257,24 @@ private fun fillMessage(fill: Fill): String {
     return "${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at"
 }
 
-/** 계좌번호를 키 이름으로 노출하지 않는다 — 목표값 자체는 평문이다. */
-private fun targetsKey(acctNo: String): Preferences.Key<String> {
+/** 계좌번호를 키 이름으로 노출하지 않는다 — 저장값 자체는 평문이다. */
+private fun accountKey(
+    prefix: String,
+    acctNo: String,
+): Preferences.Key<String> {
     val digest = MessageDigest.getInstance("SHA-256").digest(acctNo.toByteArray())
-    return stringPreferencesKey("targets_" + digest.joinToString("") { "%02x".format(it) }.take(16))
+    return stringPreferencesKey(prefix + digest.joinToString("") { "%02x".format(it) }.take(16))
 }
+
+private fun targetsKey(acctNo: String) = accountKey("targets_", acctNo)
+
+private fun cashKey(acctNo: String) = accountKey("cash_", acctNo)
+
+/** 저장값이 깨져도 화면이 죽지 않는다 — 지정이 없는 것으로 본다. */
+private fun readCashCodes(
+    prefs: Preferences,
+    key: Preferences.Key<String>,
+): Set<String> = runCatching { Json.decodeFromString<Set<String>>(prefs[key] ?: "[]") }.getOrDefault(emptySet())
 
 /** 저장값이 깨졌거나 범위를 벗어나도 화면이 죽지 않는다. */
 private fun readTargets(
@@ -296,7 +351,7 @@ fun PortfolioScreen(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             )
                         }
-                        SummaryCard(plan) { vm.normalizeTargets() }
+                        SummaryCard(plan, ui.cashAssets) { vm.normalizeTargets() }
                         ModeSelector(rebalanceMode) { rebalanceMode = it }
                         SelectAllBar(plan, rebalanceMode, selected) { selected = it }
                         HoldingsList(
@@ -304,6 +359,7 @@ fun PortfolioScreen(
                             plan = plan,
                             rebalanceMode = rebalanceMode,
                             selected = selected,
+                            cashLabel = cashLabel(ui.cashAssets),
                             onEdit = { code, bp -> editing = listOf(code) to bp },
                             onToggle = { code ->
                                 selected = if (code in selected) selected - code else selected + code
@@ -339,6 +395,11 @@ fun PortfolioScreen(
             codes = codes,
             currentBp = currentBp,
             holdings = ui.balance?.holdings.orEmpty(),
+            cashCodes = ui.cashCodes,
+            onToggleCash = { code ->
+                vm.toggleCashAsset(code)
+                editing = null
+            },
             onDismiss = { editing = null },
             onSet = { bp ->
                 val single = codes.singleOrNull()
@@ -356,6 +417,8 @@ private fun TargetEditor(
     codes: List<String>,
     currentBp: Int?,
     holdings: List<Holding>,
+    cashCodes: Set<String>,
+    onToggleCash: (String) -> Unit,
     onDismiss: () -> Unit,
     onSet: (Int?) -> Unit,
 ) {
@@ -366,7 +429,18 @@ private fun TargetEditor(
             single == Rebalance.CASH -> "예수금"
             else -> holdings.firstOrNull { it.code == single }?.name ?: single
         }
-    TargetDialog(name = name, currentBp = currentBp, onDismiss = onDismiss, onSet = onSet)
+    // 현금성 지정은 단건, 그것도 실제 종목에만 — 예수금 행이나 일괄 편집에는 뜻이 없다.
+    val cashToggle =
+        single
+            ?.takeIf { it != Rebalance.CASH }
+            ?.let { CashToggle(isCash = it in cashCodes, onClick = { onToggleCash(it) }) }
+    TargetDialog(
+        name = name,
+        currentBp = currentBp,
+        cashToggle = cashToggle,
+        onDismiss = onDismiss,
+        onSet = onSet,
+    )
 }
 
 /**
@@ -466,13 +540,21 @@ private fun ClearTargetsDialog(
 @Composable
 private fun SummaryCard(
     plan: Rebalance.Plan,
+    cashAssets: Int,
     onNormalize: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth().padding(16.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("총 평가", style = MaterialTheme.typography.bodySmall)
             Text(plan.total.krw(), style = MaterialTheme.typography.titleMedium)
-            Text("예수금(D+2) ${plan.lines.last().currentAmt.krw()}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (cashAssets > 0) {
+                    "현금 ${plan.lines.last().currentAmt.krw()} (예수금 + 현금성 ${cashAssets}건)"
+                } else {
+                    "예수금(D+2) ${plan.lines.last().currentAmt.krw()}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
 
             val sum = plan.targetSumBp
             if (sum > 0) {
@@ -538,6 +620,7 @@ private fun HoldingsList(
     plan: Rebalance.Plan,
     rebalanceMode: Boolean,
     selected: Set<String>,
+    cashLabel: String,
     onEdit: (code: String, currentBp: Int?) -> Unit,
     onToggle: (code: String) -> Unit,
     modifier: Modifier = Modifier,
@@ -548,6 +631,7 @@ private fun HoldingsList(
             HoldingRow(
                 line = line,
                 holding = byCode[line.code],
+                cashLabel = cashLabel,
                 rebalanceMode = rebalanceMode,
                 checked = line.code in selected,
                 onEdit = { onEdit(line.code, line.targetBp) },
@@ -562,6 +646,7 @@ private fun HoldingsList(
 private fun HoldingRow(
     line: Rebalance.Line,
     holding: Holding?,
+    cashLabel: String,
     rebalanceMode: Boolean,
     checked: Boolean,
     onEdit: () -> Unit,
@@ -592,7 +677,7 @@ private fun HoldingRow(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(holding?.name ?: "예수금", style = MaterialTheme.typography.titleMedium)
+                Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
             HoldingDetail(line, holding, rebalanceMode)
@@ -663,6 +748,7 @@ private fun DeltaText(delta: Long?) {
 private fun TargetDialog(
     name: String,
     currentBp: Int?,
+    cashToggle: CashToggle?,
     onDismiss: () -> Unit,
     onSet: (Int?) -> Unit,
 ) {
@@ -705,6 +791,11 @@ private fun TargetDialog(
                 )
                 if (text.isNotBlank() && parsedBp == null) {
                     Text("0 ~ 100 사이 숫자를 입력하세요", color = MaterialTheme.colorScheme.error)
+                }
+                if (cashToggle != null) {
+                    TextButton(onClick = cashToggle.onClick, modifier = Modifier.padding(top = 8.dp)) {
+                        Text(if (cashToggle.isCash) "현금성 자산에서 빼기" else "현금성 자산으로 묶기")
+                    }
                 }
             }
         },

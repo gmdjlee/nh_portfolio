@@ -165,6 +165,69 @@ class RebalanceTest {
         }
     }
 
+    // ---- foldCash ----
+
+    @Test
+    fun `현금성 자산은 예수금에 합쳐지고 목록에서 빠진다`() {
+        val b =
+            Balance(
+                cash = 100_000,
+                holdings = listOf(holding("005930", 10, 70_000), holding("CMA01", 1, 500_000)),
+            )
+
+        val folded = Rebalance.foldCash(b, setOf("CMA01"))
+
+        assertEquals(600_000, folded.cash)
+        assertEquals(listOf("005930"), folded.holdings.map { it.code })
+    }
+
+    @Test
+    fun `현금성으로 묶으면 매매 계획에서도 빠진다`() {
+        val b =
+            Balance(
+                cash = 0,
+                holdings = listOf(holding("A", 10, 10_000), holding("CMA01", 1, 900_000)),
+            )
+        // 총자산 100만. CMA 를 묶으면 현금 90만 + 주식 10만.
+        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf("CMA01")), mapOf("A" to 5_000))
+
+        assertNull(plan.lines.firstOrNull { it.code == "CMA01" }, "현금성 자산이 종목 행으로 남았다")
+        assertEquals(900_000, plan.lines.last().currentAmt)
+        // 목표 50% = 50만 / 1만 = 50주, 현재 10주 -> +40
+        assertEquals(40, plan.lines.first { it.code == "A" }.deltaShares)
+    }
+
+    @Test
+    fun `현금성 자산의 비중은 현금 행에 반영된다`() {
+        val b = Balance(cash = 0, holdings = listOf(holding("A", 1, 500_000), holding("CMA01", 1, 500_000)))
+
+        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf("CMA01")), emptyMap())
+
+        assertEquals(5_000, plan.lines.last().weightBp)
+    }
+
+    @Test
+    fun `지정이 없거나 해당 종목이 없으면 잔고가 그대로다`() {
+        val b = Balance(cash = 100, holdings = listOf(holding("A", 1, 900)))
+
+        assertEquals(b, Rebalance.foldCash(b, emptySet()))
+        assertEquals(b, Rebalance.foldCash(b, setOf("없는코드")))
+    }
+
+    @Test
+    fun `여러 현금성 자산이 모두 합쳐진다`() {
+        val b =
+            Balance(
+                cash = 1_000,
+                holdings = listOf(holding("A", 1, 100), holding("CMA", 1, 2_000), holding("MMF", 1, 3_000)),
+            )
+
+        val folded = Rebalance.foldCash(b, setOf("CMA", "MMF"))
+
+        assertEquals(6_000, folded.cash)
+        assertEquals(listOf("A"), folded.holdings.map { it.code })
+    }
+
     // ---- scaleForCash ----
 
     @Test
