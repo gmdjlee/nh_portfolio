@@ -19,6 +19,8 @@ jobs:
       # 설명하려고 두 이름을 그대로 인용하고 있어서, 안 걸러내면 항상 빨간불이 된다.
       - name: PIN 은 저장 상태에 들어가지 않는다
         run: >-
+          ls -d app/src/main/kotlin/dev/nhportfolio/lock
+          app/src/main/kotlin/dev/nhportfolio/settings > /dev/null &&
           ! grep -rn 'rememberSaveable\|SavedStateHandle'
           app/src/main/kotlin/dev/nhportfolio/lock
           app/src/main/kotlin/dev/nhportfolio/settings
