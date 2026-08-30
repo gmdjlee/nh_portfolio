@@ -1,5 +1,7 @@
 # NH Portfolio
 
+[![CI](https://github.com/gmdjlee/nh_portfolio/actions/workflows/ci.yml/badge.svg)](https://github.com/gmdjlee/nh_portfolio/actions/workflows/ci.yml)
+
 NH투자증권 나무 계좌의 보유 종목과 자산 비중을 보고, 목표 비중을 입력하면
 매수/매도해야 할 주식 수를 계산해 주는 개인용 Android 앱. **거래 기능은 없다.**
 
