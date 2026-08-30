@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -367,7 +368,6 @@ fun PortfolioScreen(
                         SummaryCard(plan, ui.cashAssets) { vm.normalizeTargets() }
                         ModeSelector(rebalanceMode, balance.holdings.size) { rebalanceMode = it }
                         SelectAllBar(plan, rebalanceMode, selected) { selected = it }
-                        ColumnHeader()
                         HoldingsList(
                             balance = balance,
                             plan = plan,
@@ -698,8 +698,10 @@ private fun ModeTab(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    // IntrinsicSize.Max 로 열 너비를 글자에 묶는다 — 안 그러면 밑줄의 fillMaxWidth 가
+    // 부모의 남은 폭을 통째로 가져가 첫 탭만 길게 늘어난다.
     Column(
-        Modifier.clickable(onClick = onClick).padding(top = 2.dp),
+        Modifier.clickable(onClick = onClick).width(IntrinsicSize.Max).padding(top = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -713,25 +715,6 @@ private fun ModeTab(
                 .fillMaxWidth()
                 .height(2.5.dp)
                 .background(if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent),
-        )
-    }
-}
-
-/** 표 머리줄. 어느 열이 무엇인지 한 번만 말해 주면 아래 행들이 라벨 없이 숫자만 보여줄 수 있다. */
-@Composable
-private fun ColumnHeader() {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text("종목 · 보유", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            "평가금액 · 수익률 · 비중",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
