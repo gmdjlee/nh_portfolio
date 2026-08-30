@@ -57,6 +57,9 @@ class FormatTest {
         assertTrue("앱 키" in NhException("HTTP401", "token rejected").userMessage())
         assertTrue("요청이 많" in NhException("HTTP429", "x").userMessage())
         assertEquals("종목코드 항목을 입력하세요.", NhException("40010", "종목코드 항목을 입력하세요.").userMessage())
+        // rsp_msg 가 비어 있으면(coerceInputValues 로 기본값 "") Exception("").message 는
+        // null 이 아니라 "" 라서 `?:` 가 발동하지 않는다 — 빈 화면이 아니라 안내 문구가 나가야 한다.
+        assertEquals("오류가 발생했습니다", NhException("40010", "").userMessage())
         assertEquals("네트워크 오류", IOException("https://...?appkey=SECRET").userMessage())
         assertEquals("응답 형식 오류", SerializationException("field APPSECRET missing").userMessage())
         assertTrue("손상" in VaultCorruptException().userMessage())

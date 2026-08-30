@@ -45,9 +45,14 @@ fun Throwable.userMessage(): String =
         is NhException -> {
             when (code) {
                 "AUTH", "HTTP400", "HTTP401" -> "인증 실패 — 설정에서 앱 키를 확인하세요"
+
                 "HTTP429" -> "요청이 많습니다. 잠시 후 다시 시도하세요"
+
                 "WS" -> "실시간 연결이 끊겼습니다"
-                else -> message ?: "오류가 발생했습니다"
+
+                // rsp_msg 가 없거나 빈 문자열이면(coerceInputValues 기본값) message 는 null 이
+                // 아니라 "" 라서 `?:` 가 발동하지 않는다 — 빈 화면 대신 안내 문구를 낸다.
+                else -> message?.takeIf { it.isNotBlank() } ?: "오류가 발생했습니다"
             }
         }
 

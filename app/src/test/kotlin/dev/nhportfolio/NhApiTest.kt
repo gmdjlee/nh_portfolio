@@ -153,12 +153,15 @@ class NhApiTest {
 
             val e = assertFailsWith<NhException> { f.api.accounts() }
 
+            // 요청이 하나뿐이어야 토큰 발급 지점(throw)에서 막힌 것이 보장된다 —
+            // 안 그러면 도메인 호출 경로의 HTTP500 도 이 assert 를 통과해 버린다.
+            assertEquals(1, f.requests.size)
             // userMessage() 는 매핑되지 않은 코드에서 message 를 그대로 내보낸다(NH 의 한국어
             // rsp_msg 를 살리기 위한 의도된 동작). 그러니 던지는 쪽이 내부 라벨이 아니라
             // 한국어를 담아야 한다 — 안 그러면 사용자가 "token" 같은 영어를 보게 된다.
             assertEquals("HTTP500", e.code)
             assertTrue(
-                e.userMessage().any { it in '가'..'힣' },
+                e.userMessage().none { it in 'a'..'z' || it in 'A'..'Z' },
                 "화면에 영어 내부 라벨이 나갔다: ${e.userMessage()}",
             )
         }
