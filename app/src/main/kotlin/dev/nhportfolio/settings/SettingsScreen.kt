@@ -25,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -77,18 +76,18 @@ class SettingsViewModel(
      * 같은 키를 다시 붙여넣었다고 재발급이 일어나면 NH 보안 알림이 쌓인다.
      */
     fun save(
-        rawKey: String,
-        rawSecret: String,
+        appKey: String,
+        appSecret: String,
     ) {
-        val appKey = rawKey.trim()
-        val appSecret = rawSecret.trim()
+        val key = appKey.trim()
+        val secret = appSecret.trim()
         when {
-            appKey.isEmpty() || appSecret.isEmpty() -> {
+            key.isEmpty() || secret.isEmpty() -> {
                 error = "앱 키와 시크릿을 모두 입력하세요"
                 return
             }
 
-            !appKey.all { it.code in PRINTABLE } || !appSecret.all { it.code in PRINTABLE } -> {
+            !key.all { it.code in PRINTABLE } || !secret.all { it.code in PRINTABLE } -> {
                 error = "앱 키에 공백이나 줄바꿈이 섞여 있습니다"
                 return
             }
@@ -96,10 +95,10 @@ class SettingsViewModel(
         viewModelScope.launch {
             runCatching {
                 vault.update { current ->
-                    val unchanged = current.appKey == appKey && current.appSecret == appSecret
+                    val unchanged = current.appKey == key && current.appSecret == secret
                     current.copy(
-                        appKey = appKey,
-                        appSecret = appSecret,
+                        appKey = key,
+                        appSecret = secret,
                         token = if (unchanged) current.token else null,
                         tokenIssuedAt = if (unchanged) current.tokenIssuedAt else 0,
                         tokenExpiresAt = if (unchanged) current.tokenExpiresAt else 0,
@@ -116,7 +115,7 @@ class SettingsViewModel(
 
     fun enrollBiometric(activity: FragmentActivity) {
         viewModelScope.launch {
-            if (!biometric.enroll(activity)) error = "지문을 등록하지 못했습니다"
+            error = if (biometric.enroll(activity)) null else "지문을 등록하지 못했습니다"
         }
     }
 
@@ -138,7 +137,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val activity = LocalActivity.current as? FragmentActivity
-    val scope = rememberCoroutineScope()
     val hasKeys by vm.hasKeys.collectAsStateWithLifecycle()
     val bioEnrolled by vm.bioEnrolled.collectAsStateWithLifecycle()
     val biometricAvailable = remember { Biometric.available(context) }
@@ -170,7 +168,15 @@ fun SettingsScreen(
             Text("NH PLUG 앱 키", style = MaterialTheme.typography.titleMedium)
             AssistChip(
                 onClick = { },
-                label = { Text(if (hasKeys == true) "저장됨" else "미설정") },
+                label = {
+                    Text(
+                        when (hasKeys) {
+                            true -> "저장됨"
+                            false -> "미설정"
+                            null -> "확인 중…"
+                        },
+                    )
+                },
             )
             Text(
                 "저장된 값은 다시 보여주지 않습니다. 바꾸려면 새로 입력해 저장하세요.",
@@ -250,7 +256,7 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmWipe = false
-                    scope.launch { vm.wipe() }
+                    vm.wipe()
                 }) { Text("초기화", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmWipe = false }) { Text("취소") } },
