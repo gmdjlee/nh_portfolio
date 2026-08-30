@@ -29,7 +29,7 @@ private val Fern = Color(0xFF7DD8A0)
 private val InkDark = Color(0xFFF2F4F7)
 private val InkMutedDark = Color(0xFF8B93A1)
 private val PaperDark = Color(0xFF0E1116)
-private val Surface2Dark = Color(0xFF151A21)
+private val Surface2Dark = Color(0xFF1C222B)
 private val DividerDark = Color(0xFF212832)
 
 private val Ember = Color(0xFFB3412F)
