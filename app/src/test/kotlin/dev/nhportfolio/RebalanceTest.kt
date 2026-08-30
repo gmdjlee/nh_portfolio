@@ -3,6 +3,7 @@ package dev.nhportfolio
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Holding
 import dev.nhportfolio.portfolio.Rebalance
+import kotlin.math.abs
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -160,6 +161,118 @@ class RebalanceTest {
                     (h.qty + d) * h.price
                 }
             assertTrue(bought <= plan.total, "bought=$bought total=${plan.total}")
+        }
+    }
+
+    // ---- scaleForCash ----
+
+    @Test
+    fun `예수금 목표를 잡으면 종목 합이 정확히 나머지가 된다`() {
+        val out = Rebalance.scaleForCash(mapOf("A" to 4000, "B" to 3000, "C" to 3000), cashBp = 1000)
+
+        assertEquals(mapOf("A" to 3600, "B" to 2700, "C" to 2700, Rebalance.CASH to 1000), out)
+        assertEquals(10_000, out.values.sum())
+    }
+
+    @Test
+    fun `종목끼리의 상대 비율은 유지된다`() {
+        // 6000 -> 3000 은 정확히 절반이라 2:1 이 정수로 떨어진다
+        val out = Rebalance.scaleForCash(mapOf("A" to 4000, "B" to 2000), cashBp = 7000)
+
+        assertEquals(2000, out.getValue("A"))
+        assertEquals(1000, out.getValue("B"))
+        assertEquals(2 * out.getValue("B"), out.getValue("A"))
+    }
+
+    @Test
+    fun `정수로 떨어지지 않는 비율은 1bp 안에서만 어긋난다`() {
+        // 4000:2000 을 5000 에 담으면 3333.33:1666.67 — 정수 bp 로는 정확할 수 없다.
+        // 합을 정확히 맞추는 쪽이 우선이고, 비율 오차는 1bp 를 넘지 않아야 한다.
+        val out = Rebalance.scaleForCash(mapOf("A" to 4000, "B" to 2000), cashBp = 5000)
+
+        assertEquals(5000, out.getValue("A") + out.getValue("B"))
+        assertTrue(abs(out.getValue("A") - 2 * out.getValue("B")) <= 1, "비율 오차가 1bp 를 넘었다: $out")
+    }
+
+    @Test
+    fun `종목 합이 모자라면 늘리기도 한다`() {
+        // 70% 만 배분된 상태에서 예수금 10% -> 종목이 90% 를 채워야 하므로 증가한다
+        val out = Rebalance.scaleForCash(mapOf("A" to 4000, "B" to 3000), cashBp = 1000)
+
+        assertEquals(9000, out.getValue("A") + out.getValue("B"))
+        assertTrue(out.getValue("A") > 4000, "줄어들기만 하면 '증가/감소' 요구를 못 지킨다: $out")
+    }
+
+    @Test
+    fun `반올림 잔여분이 배분되어 합이 어긋나지 않는다`() {
+        // 3등분은 정수 bp 로 나누어떨어지지 않는다 — 3333+3333+3333 = 9999 가 되면 안 된다
+        val out = Rebalance.scaleForCash(mapOf("A" to 1, "B" to 1, "C" to 1), cashBp = 0)
+
+        assertEquals(10_000, out.values.sum() - out.getValue(Rebalance.CASH))
+        assertEquals(listOf(3333, 3333, 3334), out.filterKeys { it != Rebalance.CASH }.values.sorted())
+    }
+
+    @Test
+    fun `예수금을 거듭 바꿔도 누적 오차가 없다`() {
+        val start = mapOf("A" to 5000, "B" to 3000, "C" to 2000)
+
+        val once = Rebalance.scaleForCash(start, cashBp = 2000)
+        val twice = Rebalance.scaleForCash(Rebalance.scaleForCash(start, cashBp = 1000), cashBp = 2000)
+
+        // 10% 를 거쳐 20% 로 가든 곧장 20% 로 가든 결과가 같아야 한다
+        assertEquals(once, twice)
+        assertEquals(8000, twice.filterKeys { it != Rebalance.CASH }.values.sum())
+    }
+
+    @Test
+    fun `예수금 100 퍼센트면 전 종목이 0 이 된다`() {
+        val out = Rebalance.scaleForCash(mapOf("A" to 6000, "B" to 4000), cashBp = 10_000)
+
+        assertEquals(0, out.getValue("A"))
+        assertEquals(0, out.getValue("B"))
+        assertEquals(10_000, out.getValue(Rebalance.CASH))
+    }
+
+    @Test
+    fun `종목 목표가 없으면 예수금만 설정한다`() {
+        assertEquals(mapOf(Rebalance.CASH to 3000), Rebalance.scaleForCash(emptyMap(), cashBp = 3000))
+        // 목표가 전부 0 이어도 나눌 기준이 없으므로 건드리지 않는다
+        assertEquals(
+            mapOf("A" to 0, Rebalance.CASH to 3000),
+            Rebalance.scaleForCash(mapOf("A" to 0), cashBp = 3000),
+        )
+    }
+
+    @Test
+    fun `범위 밖 예수금 목표는 거부한다`() {
+        assertFailsWith<IllegalArgumentException> { Rebalance.scaleForCash(mapOf("A" to 100), 10_001) }
+        assertFailsWith<IllegalArgumentException> { Rebalance.scaleForCash(mapOf("A" to 100), -1) }
+    }
+
+    @Test
+    fun `조정 결과를 plan 에 넣으면 목표 합계가 100 퍼센트가 된다`() {
+        val holdings = listOf(holding("A", 10, 1000), holding("B", 10, 2000))
+        val balance = Balance(cash = 5_000, holdings = holdings)
+
+        val targets = Rebalance.scaleForCash(mapOf("A" to 7000, "B" to 3000), cashBp = 1500)
+        val plan = Rebalance.plan(balance, targets)
+
+        assertEquals(10_000, plan.targetSumBp)
+    }
+
+    @Test
+    fun `무작위 입력에서도 합은 언제나 정확하다`() {
+        val rnd = Random(7)
+        repeat(200) {
+            val stocks = List(rnd.nextInt(1, 8)) { i -> "C$i" to rnd.nextInt(0, 5000) }.toMap()
+            val cashBp = rnd.nextInt(0, 10_001)
+            val out = Rebalance.scaleForCash(stocks, cashBp)
+
+            val stockSum = out.filterKeys { it != Rebalance.CASH }.values.sum()
+            if (stocks.values.sum() > 0) {
+                assertEquals(10_000 - cashBp, stockSum, "cashBp=$cashBp stocks=$stocks -> $out")
+            }
+            assertTrue(out.values.all { it >= 0 }, "음수 비중이 나왔다: $out")
         }
     }
 }

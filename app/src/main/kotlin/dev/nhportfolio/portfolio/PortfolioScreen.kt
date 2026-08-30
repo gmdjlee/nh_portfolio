@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -48,6 +50,7 @@ import dev.nhportfolio.api.loadResult
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
+import dev.nhportfolio.model.Holding
 import dev.nhportfolio.ui.bpPct
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
@@ -130,20 +133,64 @@ class PortfolioViewModel(
         lastFill.value = null
     }
 
-    /** [bp] 가 null 이면 목표를 지운다. 범위 밖 값은 호출 전에 걸러진다. */
+    /**
+     * [bp] 가 null 이면 목표를 지운다. 범위 밖 값은 호출 전에 걸러진다.
+     *
+     * 예수금에 목표를 주면 종목들을 비례 조정해 자리를 만든다([Rebalance.scaleForCash]).
+     * 예수금 목표를 지울 때는 조정하지 않는다 — 맞춰야 할 자리가 없어진 것뿐이다.
+     */
     fun setTarget(
         code: String,
         bp: Int?,
     ) {
         require(bp == null || bp in 0..FULL_BP) { "목표 비중은 0~100% 범위여야 합니다" }
-        viewModelScope.launch {
-            store.edit { prefs ->
-                val next = readTargets(prefs, targetsKey).toMutableMap()
-                if (bp == null) next -= code else next[code] = bp
-                prefs[targetsKey] = Json.encodeToString(next)
+        edit { current ->
+            when {
+                code == Rebalance.CASH && bp != null -> Rebalance.scaleForCash(current, bp)
+                bp == null -> current - code
+                else -> current + (code to bp)
             }
         }
     }
+
+    /**
+     * 여러 종목에 같은 목표를 한 번에 준다. [bp] 가 null 이면 모두 지운다.
+     *
+     * 낱개로 [setTarget] 을 반복 호출하면 안 된다 — 각 호출이 자기 시점의 맵을 읽어 쓰므로
+     * 마지막 것만 남는다. 한 번의 edit 안에서 전부 반영한다.
+     */
+    fun setTargets(
+        codes: Collection<String>,
+        bp: Int?,
+    ) {
+        require(bp == null || bp in 0..FULL_BP) { "목표 비중은 0~100% 범위여야 합니다" }
+        require(Rebalance.CASH !in codes) { "예수금은 일괄 설정 대상이 아니다 — scaleForCash 를 타야 한다" }
+        if (codes.isEmpty()) return
+        edit { current ->
+            if (bp == null) current - codes.toSet() else current + codes.associateWith { bp }
+        }
+    }
+
+    private fun edit(transform: (Map<String, Int>) -> Map<String, Int>) {
+        viewModelScope.launch {
+            store.edit { prefs ->
+                prefs[targetsKey] = Json.encodeToString(transform(readTargets(prefs, targetsKey)))
+            }
+        }
+    }
+}
+
+/** 체결 스낵바 문구. `conctime` 이 비었거나 짧으면 괄호째 생략한다 — "()" 만 남으면 흉하다. */
+private fun fillMessage(fill: Fill): String {
+    val at =
+        fill.time
+            .takeIf { it.length >= 4 }
+            ?.take(4)
+            ?.chunked(2)
+            ?.joinToString(":")
+            ?.let { " ($it)" }
+            .orEmpty()
+    return "${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at"
 }
 
 /** 계좌번호를 키 이름으로 노출하지 않는다 — 목표값 자체는 평문이다. */
@@ -171,19 +218,17 @@ fun PortfolioScreen(
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var rebalanceMode by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Pair<String, Int?>?>(null) }
+
+    /** 편집 대상 종목코드들. 한 개면 단건, 여러 개면 일괄. 예수금은 언제나 단건이다. */
+    var editing by remember { mutableStateOf<Pair<List<String>, Int?>?>(null) }
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+
+    // 보유 탭으로 나가면 선택은 의미가 없다 — 남겨 두면 다시 들어왔을 때 놀란다.
+    if (!rebalanceMode && selected.isNotEmpty()) selected = emptySet()
 
     LaunchedEffect(ui.lastFill) {
         ui.lastFill?.let { fill ->
-            val at =
-                fill.time
-                    .takeIf { it.length >= 4 }
-                    ?.take(4)
-                    ?.chunked(2)
-                    ?.joinToString(":")
-                    ?.let { " ($it)" }
-                    .orEmpty()
-            snackbar.showSnackbar("${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at")
+            snackbar.showSnackbar(fillMessage(fill))
             vm.consumeFill()
         }
     }
@@ -234,30 +279,80 @@ fun PortfolioScreen(
                             balance = balance,
                             plan = plan,
                             rebalanceMode = rebalanceMode,
-                            onEdit = { code, bp -> editing = code to bp },
+                            selected = selected,
+                            onEdit = { code, bp -> editing = listOf(code) to bp },
+                            onToggle = { code ->
+                                selected = if (code in selected) selected - code else selected + code
+                            },
+                            modifier = Modifier.weight(1f),
                         )
+                        if (selected.isNotEmpty()) {
+                            BatchBar(
+                                count = selected.size,
+                                onClear = { selected = emptySet() },
+                                onSet = { editing = selected.toList() to null },
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    editing?.let { (code, currentBp) ->
-        val name =
-            ui.balance
-                ?.holdings
-                ?.firstOrNull { it.code == code }
-                ?.name
-                ?: if (code == Rebalance.CASH) "예수금" else code
-        TargetDialog(
-            name = name,
+    editing?.let { (codes, currentBp) ->
+        TargetEditor(
+            codes = codes,
             currentBp = currentBp,
+            holdings = ui.balance?.holdings.orEmpty(),
             onDismiss = { editing = null },
             onSet = { bp ->
-                vm.setTarget(code, bp)
+                val single = codes.singleOrNull()
+                if (single != null) vm.setTarget(single, bp) else vm.setTargets(codes, bp)
                 editing = null
+                selected = emptySet()
             },
         )
+    }
+}
+
+/** 단건이면 종목 이름을, 일괄이면 개수를 제목에 쓴다. */
+@Composable
+private fun TargetEditor(
+    codes: List<String>,
+    currentBp: Int?,
+    holdings: List<Holding>,
+    onDismiss: () -> Unit,
+    onSet: (Int?) -> Unit,
+) {
+    val single = codes.singleOrNull()
+    val name =
+        when {
+            single == null -> "선택한 ${codes.size}개 종목"
+            single == Rebalance.CASH -> "예수금"
+            else -> holdings.firstOrNull { it.code == single }?.name ?: single
+        }
+    TargetDialog(name = name, currentBp = currentBp, onDismiss = onDismiss, onSet = onSet)
+}
+
+/** 여러 종목을 고른 동안만 뜨는 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다. */
+@Composable
+private fun BatchBar(
+    count: Int,
+    onClear: () -> Unit,
+    onSet: () -> Unit,
+) {
+    Surface(tonalElevation = 3.dp) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${count}개 선택", style = MaterialTheme.typography.bodyMedium)
+            Row {
+                TextButton(onClick = onClear) { Text("해제") }
+                TextButton(onClick = onSet) { Text("목표 비중 설정") }
+            }
+        }
     }
 }
 
@@ -317,60 +412,111 @@ private fun HoldingsList(
     balance: Balance,
     plan: Rebalance.Plan,
     rebalanceMode: Boolean,
+    selected: Set<String>,
     onEdit: (code: String, currentBp: Int?) -> Unit,
+    onToggle: (code: String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val byCode = remember(balance) { balance.holdings.associateBy { it.code } }
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(modifier.fillMaxWidth()) {
         items(plan.lines) { line ->
-            val holding = byCode[line.code]
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onEdit(line.code, line.targetBp) }
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(holding?.name ?: "예수금", style = MaterialTheme.typography.titleMedium)
-                    Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
-                }
-                if (rebalanceMode) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(
-                            "${line.weightBp.bpPct()} → ${line.targetBp?.bpPct() ?: "목표 없음"}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            text =
-                                when (val delta = line.deltaShares) {
-                                    null -> "—"
-                                    0L -> "유지"
-                                    else -> if (delta > 0) "${delta.shares()}주 매수" else "${(-delta).shares()}주 매도"
-                                },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color =
-                                when {
-                                    (line.deltaShares ?: 0L) > 0 -> MaterialTheme.colorScheme.primary
-                                    (line.deltaShares ?: 0L) < 0 -> MaterialTheme.colorScheme.secondary
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                        )
-                    }
-                } else if (holding != null) {
-                    Text(
-                        "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
-                            "평균 ${holding.avgPrice.krw()} · 현재 ${holding.price.krw()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(holding.pnlRate.pct(), color = plColor(holding.pnlRate), style = MaterialTheme.typography.bodyMedium)
-                        Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
-                    }
-                } else {
-                    Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            HoldingRow(
+                line = line,
+                holding = byCode[line.code],
+                rebalanceMode = rebalanceMode,
+                checked = line.code in selected,
+                onEdit = { onEdit(line.code, line.targetBp) },
+                onToggle = { onToggle(line.code) },
+            )
             HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun HoldingRow(
+    line: Rebalance.Line,
+    holding: Holding?,
+    rebalanceMode: Boolean,
+    checked: Boolean,
+    onEdit: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    // 예수금은 비례 조정 로직을 타야 하므로 일괄 선택 대상이 아니다.
+    val selectable = rebalanceMode && line.code != Rebalance.CASH
+    Row(
+        Modifier.fillMaxWidth().clickable { onEdit() },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selectable) {
+            Checkbox(
+                checked = checked,
+                onCheckedChange = { onToggle() },
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(
+                    start = if (selectable) 4.dp else 20.dp,
+                    end = 20.dp,
+                    top = 12.dp,
+                    bottom = 12.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(holding?.name ?: "예수금", style = MaterialTheme.typography.titleMedium)
+                Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
+            }
+            HoldingDetail(line, holding, rebalanceMode)
+        }
+    }
+}
+
+/** 이름·금액 아래 한 줄. 리밸런스 탭이면 목표와 매매 수량, 아니면 보유 명세를 보여준다. */
+@Composable
+private fun HoldingDetail(
+    line: Rebalance.Line,
+    holding: Holding?,
+    rebalanceMode: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (rebalanceMode) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    "${line.weightBp.bpPct()} → ${line.targetBp?.bpPct() ?: "목표 없음"}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text =
+                        when (val delta = line.deltaShares) {
+                            null -> "—"
+                            0L -> "유지"
+                            else -> if (delta > 0) "${delta.shares()}주 매수" else "${(-delta).shares()}주 매도"
+                        },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color =
+                        when {
+                            (line.deltaShares ?: 0L) > 0 -> MaterialTheme.colorScheme.primary
+                            (line.deltaShares ?: 0L) < 0 -> MaterialTheme.colorScheme.secondary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                )
+            }
+        } else if (holding != null) {
+            Text(
+                "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
+                    "평균 ${holding.avgPrice.krw()} · 현재 ${holding.price.krw()}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(holding.pnlRate.pct(), color = plColor(holding.pnlRate), style = MaterialTheme.typography.bodyMedium)
+                Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
+            }
+        } else {
+            Text("비중 ${line.weightBp.bpPct()}", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
