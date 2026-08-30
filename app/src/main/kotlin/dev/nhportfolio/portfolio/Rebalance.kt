@@ -37,14 +37,21 @@ object Rebalance {
      * 항상 "지금의 종목 합"에서 "남은 자리"로 스케일하므로 되풀이해 불러도 누적 오차가 없다 —
      * 예수금을 10% -> 20% -> 5% 로 바꿔도 매번 옳은 값이 나온다. 원본을 따로 보관할 필요가 없다.
      *
-     * 종목 목표가 하나도 없으면 조정할 대상이 없으므로 예수금만 설정한다.
+     * 목표가 없는 종목은 [currentWeightsBp] 의 **현재 비중**을 출발점으로 삼는다. 그래야
+     * "예수금 X% 를 만들려면 각 종목을 어떻게 조정해야 하는가" 에 모든 종목이 답을 갖는다 —
+     * 목표를 하나도 안 잡은 채 예수금만 정해도 전 종목의 조정안이 나온다.
+     * 명시한 목표가 있으면 그쪽이 이긴다.
+     *
+     * 조정할 대상이 전혀 없으면(보유도 목표도 없음) 예수금만 설정한다.
      */
     fun scaleForCash(
         targetsBp: Map<String, Int>,
         cashBp: Int,
+        currentWeightsBp: Map<String, Int> = emptyMap(),
     ): Map<String, Int> {
         require(cashBp in 0..FULL_BP) { "목표 비중은 0~100% 범위여야 합니다" }
-        val stocks = targetsBp.filterKeys { it != CASH }
+        val stocks =
+            (currentWeightsBp.filterKeys { it != CASH } + targetsBp.filterKeys { it != CASH })
         val sum = stocks.values.sum()
         if (sum <= 0) return targetsBp + (CASH to cashBp)
 

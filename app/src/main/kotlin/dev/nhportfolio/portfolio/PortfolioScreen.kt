@@ -146,8 +146,11 @@ class PortfolioViewModel(
         require(bp == null || bp in 0..FULL_BP) { "목표 비중은 0~100% 범위여야 합니다" }
         edit { current ->
             when {
-                code == Rebalance.CASH && bp != null -> Rebalance.scaleForCash(current, bp)
+                // 목표를 안 잡은 종목도 현재 비중을 기준으로 조정안을 받아야 한다.
+                code == Rebalance.CASH && bp != null -> Rebalance.scaleForCash(current, bp, currentWeightsBp())
+
                 bp == null -> current - code
+
                 else -> current + (code to bp)
             }
         }
@@ -170,6 +173,14 @@ class PortfolioViewModel(
             if (bp == null) current - codes.toSet() else current + codes.associateWith { bp }
         }
     }
+
+    /** 마지막으로 계산된 종목별 현재 비중. 아직 잔고를 못 받았으면 비어 있다. */
+    private fun currentWeightsBp(): Map<String, Int> =
+        ui.value.plan
+            ?.lines
+            .orEmpty()
+            .filter { it.code != Rebalance.CASH }
+            .associate { it.code to it.weightBp }
 
     private fun edit(transform: (Map<String, Int>) -> Map<String, Int>) {
         viewModelScope.launch {

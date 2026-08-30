@@ -244,6 +244,44 @@ class RebalanceTest {
     }
 
     @Test
+    fun `목표를 하나도 안 잡아도 현재 비중을 기준으로 조정안이 나온다`() {
+        // 이게 없으면 예수금 목표만 넣었을 때 종목 행에 아무 변화가 없다.
+        val out = Rebalance.scaleForCash(emptyMap(), cashBp = 1000, currentWeightsBp = mapOf("A" to 5000, "B" to 5000))
+
+        assertEquals(4500, out.getValue("A"))
+        assertEquals(4500, out.getValue("B"))
+        assertEquals(1000, out.getValue(Rebalance.CASH))
+        assertEquals(10_000, out.values.sum())
+    }
+
+    @Test
+    fun `명시한 목표가 현재 비중을 이긴다`() {
+        val out =
+            Rebalance.scaleForCash(
+                targetsBp = mapOf("A" to 8000),
+                cashBp = 0,
+                currentWeightsBp = mapOf("A" to 1000, "B" to 2000),
+            )
+
+        // A 는 지정한 8000, B 는 현재 비중 2000 을 기준으로 -> 8:2 비율로 10000 을 채운다
+        assertEquals(8000, out.getValue("A"))
+        assertEquals(2000, out.getValue("B"))
+    }
+
+    @Test
+    fun `현재 비중이 0 인 종목은 목표도 0 이다`() {
+        val out = Rebalance.scaleForCash(emptyMap(), cashBp = 0, currentWeightsBp = mapOf("A" to 10_000, "B" to 0))
+
+        assertEquals(10_000, out.getValue("A"))
+        assertEquals(0, out.getValue("B"))
+    }
+
+    @Test
+    fun `보유도 목표도 없으면 예수금만 설정한다`() {
+        assertEquals(mapOf(Rebalance.CASH to 3000), Rebalance.scaleForCash(emptyMap(), cashBp = 3000))
+    }
+
+    @Test
     fun `범위 밖 예수금 목표는 거부한다`() {
         assertFailsWith<IllegalArgumentException> { Rebalance.scaleForCash(mapOf("A" to 100), 10_001) }
         assertFailsWith<IllegalArgumentException> { Rebalance.scaleForCash(mapOf("A" to 100), -1) }
