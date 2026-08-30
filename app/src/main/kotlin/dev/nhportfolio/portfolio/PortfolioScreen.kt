@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -272,6 +271,37 @@ private fun fillMessage(fill: Fill): String {
     return "${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at"
 }
 
+/**
+ * 선택 상태에서 화면이 필요로 하는 값들. [selectable] 에 같은 종목코드가 두 번 들어와도
+ * 어긋나지 않도록 **개수가 아니라 집합**으로 비교한다 — 선택은 코드로 키가 잡히므로
+ * 중복 행은 하나로 세어야 체크박스 상태와 실제 선택이 일치한다.
+ */
+data class Selection(
+    /** 잔고에 아직 있는 선택만. 사라진 종목의 유령 코드는 빠진다. */
+    val codes: Set<String>,
+    val allSelected: Boolean,
+    val hasSelectable: Boolean,
+)
+
+fun selectionOf(
+    selected: Set<String>,
+    selectable: List<String>,
+): Selection {
+    val distinct = selectable.toSet()
+    val codes = selected intersect distinct
+    return Selection(
+        codes = codes,
+        allSelected = distinct.isNotEmpty() && codes.size == distinct.size,
+        hasSelectable = distinct.isNotEmpty(),
+    )
+}
+
+/** 전체 선택 토글. 이미 전부 골랐으면 비우고, 아니면 전부 고른다. */
+fun toggleAll(
+    selection: Selection,
+    selectable: List<String>,
+): Set<String> = if (selection.allSelected) emptySet() else selectable.toSet()
+
 @Composable
 fun PortfolioScreen(
     acctNo: String,
@@ -307,15 +337,14 @@ fun PortfolioScreen(
         }
     }
 
-    // 고를 수 있는 종목과 유효한 선택. 예수금은 비례 조정 경로를 타므로 빠진다.
-    // 잔고가 갱신되어 사라진 종목이 selected 에 남아도 유령이 개수·일괄 조작에 끼지 않는다.
+    // 고를 수 있는 종목. 예수금은 비례 조정 경로를 타므로 빠진다.
     val selectable =
         ui.plan
             ?.lines
             .orEmpty()
             .filter { it.code != Rebalance.CASH }
             .map { it.code }
-    val selectedCodes = selected intersect selectable.toSet()
+    val selection = selectionOf(selected, selectable)
 
     Scaffold(
         modifier = modifier,
@@ -323,12 +352,13 @@ fun PortfolioScreen(
         topBar = {
             PortfolioTopBar(
                 acctNo = acctNo,
-                selecting = selecting,
-                selectedCodes = selectedCodes,
-                selectable = selectable,
+                // 리로드 실패로 plan 이 없으면 고를 대상 자체가 없다 — 선택 상단바 대신
+                // 새로고침 가능한 기본 바를 보여준다. selecting(모드 자체)은 그대로 유지된다.
+                selecting = selecting && ui.plan != null,
+                selection = selection,
                 onBack = onBack,
                 onRefresh = vm::refresh,
-                onSelectedChange = { selected = it },
+                onToggleAll = { selected = toggleAll(selection, selectable) },
                 onExit = exitSelection,
             )
         },
@@ -372,18 +402,18 @@ fun PortfolioScreen(
                             onEdit = { code, bp -> editing = listOf(code) to bp },
                             onLongPress = { code ->
                                 selecting = true
-                                selected = selected + code
+                                selected = selection.codes + code
                             },
                             onToggle = { code ->
-                                selected = if (code in selected) selected - code else selected + code
+                                selected = if (code in selection.codes) selection.codes - code else selection.codes + code
                             },
                             modifier = Modifier.weight(1f),
                         )
                         if (selecting) {
                             BatchBar(
-                                enabled = selectedCodes.isNotEmpty(),
+                                enabled = selection.codes.isNotEmpty(),
                                 onClearTargets = { confirmClear = true },
-                                onSet = { editing = selectedCodes.toList() to null },
+                                onSet = { editing = selection.codes.toList() to null },
                             )
                         }
                     }
@@ -393,10 +423,10 @@ fun PortfolioScreen(
     }
 
     ClearTargetsDialog(
-        count = selectedCodes.size.takeIf { confirmClear },
+        count = selection.codes.size.takeIf { confirmClear },
         onDismiss = { confirmClear = false },
         onConfirm = {
-            vm.setTargets(selectedCodes.toList(), null)
+            vm.setTargets(selection.codes.toList(), null)
             confirmClear = false
             exitSelection()
         },
@@ -432,22 +462,19 @@ fun PortfolioScreen(
 private fun PortfolioTopBar(
     acctNo: String,
     selecting: Boolean,
-    selectedCodes: Set<String>,
-    selectable: List<String>,
+    selection: Selection,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
-    onSelectedChange: (Set<String>) -> Unit,
+    onToggleAll: () -> Unit,
     onExit: () -> Unit,
 ) {
     if (selecting) {
         SelectionTopBar(
-            count = selectedCodes.size,
-            allSelected = selectable.isNotEmpty() && selectedCodes.size == selectable.size,
-            anySelected = selectedCodes.isNotEmpty(),
-            hasSelectable = selectable.isNotEmpty(),
-            onToggleAll = {
-                onSelectedChange(if (selectedCodes.size == selectable.size) emptySet() else selectable.toSet())
-            },
+            count = selection.codes.size,
+            allSelected = selection.allSelected,
+            anySelected = selection.codes.isNotEmpty(),
+            hasSelectable = selection.hasSelectable,
+            onToggleAll = onToggleAll,
             onExit = onExit,
         )
     } else {
@@ -518,17 +545,25 @@ private fun SelectionTopBar(
             }
         },
         actions = {
-            TriStateCheckbox(
-                state =
-                    when {
-                        allSelected -> ToggleableState.On
-                        anySelected -> ToggleableState.Indeterminate
-                        else -> ToggleableState.Off
-                    },
-                onClick = onToggleAll,
-                enabled = hasSelectable,
-                modifier = Modifier.semantics { contentDescription = "전체 선택" },
-            )
+            // 다섯 메뉴 중 유일하게 화면에 글자가 없던 항목 — 부분 선택일 땐 대시만 그려져
+            // 무엇을 하는 체크박스인지 알 수 없었다. contentDescription 은 그대로 두고 글자를 더한다.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("전체 선택", style = MaterialTheme.typography.labelLarge)
+                TriStateCheckbox(
+                    state =
+                        when {
+                            allSelected -> ToggleableState.On
+                            anySelected -> ToggleableState.Indeterminate
+                            else -> ToggleableState.Off
+                        },
+                    onClick = onToggleAll,
+                    enabled = hasSelectable,
+                    modifier = Modifier.semantics { contentDescription = "전체 선택" },
+                )
+            }
         },
     )
 }
