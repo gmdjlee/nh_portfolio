@@ -167,6 +167,39 @@ class NhApiTest {
         }
 
     @Test
+    fun `토큰 403 은 NH 가 보낸 사유를 그대로 보여준다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            // 실제 NH 응답 형태다 — 자격 오류에 401 이 아니라 403 을 준다.
+            f.handle = {
+                json(
+                    """{"error_description":"유효하지 않은 AppKey입니다.","error_code":"IGW40031"}""",
+                    HttpStatusCode.Forbidden,
+                )
+            }
+
+            val e = assertFailsWith<NhException> { f.api.accounts() }
+
+            assertEquals("HTTP403", e.code)
+            // 403 은 Format 의 코드 매핑에 없어서 message 가 그대로 화면에 나간다.
+            // "인증 서버 오류 — 잠시 후..." 가 나오면 서버 장애로 오인시키는 버그다.
+            assertEquals("유효하지 않은 AppKey입니다.", e.userMessage())
+        }
+
+    @Test
+    fun `토큰 4xx 에 본문이 없으면 앱 키를 확인하라고 안내한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { json("", HttpStatusCode.Forbidden) }
+
+            val e = assertFailsWith<NhException> { f.api.accounts() }
+
+            assertEquals("인증 실패 — 설정에서 앱 키를 확인하세요", e.userMessage())
+        }
+
+    @Test
     fun `유효한 저장 토큰이 있으면 발급하지 않는다`() =
         runTest {
             val f = ApiFixture()

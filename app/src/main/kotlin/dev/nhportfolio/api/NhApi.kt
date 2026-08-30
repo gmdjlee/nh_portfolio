@@ -68,6 +68,7 @@ private const val RATE_LIMIT_RETRIES = 3
 private const val RATE_LIMIT_BASE_DELAY_MS = 300L
 private const val WS_PING_SECONDS = 30L
 private const val REQUEST_TIMEOUT_MS = 15_000L
+private const val HTTP_SERVER_ERROR = 500
 private const val CONNECT_TIMEOUT_MS = 10_000L
 
 private const val WS = "wss://api.nhplug.com:7070/websocket" // 통보 채널은 국내·해외 모두 7070
@@ -237,9 +238,21 @@ class NhApi(
                 // cause 를 붙이지 않는다 — Ktor 타임아웃 메시지에는 appkey 가 담긴 URL 이 들어 있다
                 throw IOException(cause::class.simpleName)
             }
-        // 메시지는 그대로 화면에 나갈 수 있다 — 내부 라벨이 아니라 한국어로 쓴다
+        // 메시지는 그대로 화면에 나갈 수 있다 — 내부 라벨이 아니라 한국어로 쓴다.
+        // NH 는 자격 오류에 401 이 아니라 403 을 주고, 본문에 정확한 사유를 담아 보낸다.
+        // 그 사유를 버리면 사용자는 왜 막혔는지 알 길이 없다 — 있으면 그대로 쓴다.
         if (!response.status.isSuccess()) {
-            throw NhException("HTTP${response.status.value}", "인증 서버 오류 — 잠시 후 다시 시도하세요")
+            val reason =
+                loadResult { NhJson.decodeFromString<TokenErrorDto>(response.bodyAsText()).description }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+            val fallback =
+                if (response.status.value < HTTP_SERVER_ERROR) {
+                    "인증 실패 — 설정에서 앱 키를 확인하세요"
+                } else {
+                    "인증 서버 오류 — 잠시 후 다시 시도하세요"
+                }
+            throw NhException("HTTP${response.status.value}", reason ?: fallback)
         }
         return loadResult { NhJson.decodeFromString<TokenDto>(response.bodyAsText()) }
             .getOrElse { throw NhException("AUTH", "bad token body") }
@@ -440,6 +453,16 @@ private data class TokenDto(
 ) {
     override fun toString(): String = "TokenDto(***)"
 }
+
+/**
+ * 토큰 발급 실패 응답. NH 는 자격 오류에 **403** 과 한국어 설명을 준다 —
+ * 예: `{"error_description":"유효하지 않은 AppKey입니다.","error_code":"IGW40031"}`.
+ * 이 문구가 우리가 만들 수 있는 어떤 문장보다 정확해서 그대로 화면에 낸다.
+ */
+@Serializable
+private data class TokenErrorDto(
+    @SerialName("error_description") val description: String = "",
+)
 
 @Serializable
 private data class FillDto(
