@@ -240,6 +240,7 @@ fun PinFlow(
     mode: PinMode,
     biometric: Biometric,
     onDone: (Boolean) -> Unit,
+    cancellable: Boolean = false,
     modifier: Modifier = Modifier,
     vm: LockViewModel = koinViewModel(),
 ) {
@@ -259,7 +260,7 @@ fun PinFlow(
             vm.onBiometricResult(biometric.unlock(activity))
         }
     }
-    if (mode == PinMode.Verify) BackHandler { /* 잠긴 동안 뒤로가기로 화면을 벗어날 수 없다 */ }
+    if (mode == PinMode.Verify && !cancellable) BackHandler { /* 잠긴 동안 뒤로가기로 화면을 벗어날 수 없다 */ }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -313,7 +314,7 @@ fun PinFlow(
                     Text("지문으로 잠금 해제")
                 }
             }
-            if (mode == PinMode.Change) {
+            if (mode == PinMode.Change || cancellable) {
                 TextButton(onClick = vm::cancel) { Text("취소") }
             }
         }
