@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
@@ -286,6 +289,7 @@ fun PortfolioScreen(
                         }
                         SummaryCard(plan)
                         ModeSelector(rebalanceMode) { rebalanceMode = it }
+                        SelectAllBar(plan, rebalanceMode, selected) { selected = it }
                         HoldingsList(
                             balance = balance,
                             plan = plan,
@@ -343,6 +347,53 @@ private fun TargetEditor(
             else -> holdings.firstOrNull { it.code == single }?.name ?: single
         }
     TargetDialog(name = name, currentBp = currentBp, onDismiss = onDismiss, onSet = onSet)
+}
+
+/**
+ * 리밸런스 탭 머리줄. 전체 선택·해제와 현재 선택 수를 보여준다.
+ *
+ * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다 —
+ * 체크박스 관례를 그대로 따른다. 예수금은 [total] 에서 빠져 있다(비례 조정 경로를 타야 한다).
+ */
+@Composable
+private fun SelectAllBar(
+    plan: Rebalance.Plan,
+    rebalanceMode: Boolean,
+    selected: Set<String>,
+    onSelectedChange: (Set<String>) -> Unit,
+) {
+    if (!rebalanceMode) return
+    val selectable = remember(plan) { plan.lines.filter { it.code != Rebalance.CASH }.map { it.code } }
+    // 잔고가 바뀌어 사라진 종목은 선택에서 뺀다 — 없는 종목에 목표를 쓰면 합계만 어긋나고
+    // 화면 어디에도 보이지 않는다.
+    val stale = selected - selectable.toSet()
+    if (stale.isNotEmpty()) onSelectedChange(selected - stale)
+
+    val total = selectable.size
+    val selectedCount = selectable.count { it in selected }
+    val onToggleAll = { onSelectedChange(if (total > 0 && selectedCount == total) emptySet() else selectable.toSet()) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = total > 0, onClick = onToggleAll)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TriStateCheckbox(
+            state =
+                when {
+                    total > 0 && selectedCount == total -> ToggleableState.On
+                    selectedCount == 0 -> ToggleableState.Off
+                    else -> ToggleableState.Indeterminate
+                },
+            onClick = onToggleAll,
+            enabled = total > 0,
+        )
+        Text("전체 선택", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.weight(1f))
+        Text("$selectedCount / $total", style = MaterialTheme.typography.bodySmall)
+    }
+    HorizontalDivider()
 }
 
 /** 여러 종목을 고른 동안만 뜨는 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다. */
