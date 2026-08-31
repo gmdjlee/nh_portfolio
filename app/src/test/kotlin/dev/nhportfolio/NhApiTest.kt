@@ -81,6 +81,15 @@ private const val BALANCE_CREDIT_BODY = """
               "pdt_tp_nm":"신용융자","lon_bnc_amt":1000000,"lon_byn_dt":"20260115"}]}
 """
 
+/** 대출이 없는 일반(위탁) 매수분 — NH 는 lon_bnc_amt 를 숫자 0 이 아니라 빈 문자열로 내려준다. */
+private const val BALANCE_BLANK_LOAN_AMT_BODY = """
+{"rsp_cd":"00000","rsp_msg":"조회가 완료되었습니다.",
+ "Output_0":{"dca":111,"nxt2_dd_dca":500000,"tot_eal_amt":700000},
+ "Output_1":[{"iem_cd":"005930","iem_nm":"삼성전자","itg_bnc_qty":10.0,"rsdl_qty":10.0,
+              "phs_pr":68000,"now_pr":70000,"eal_amt":700000,"pft_rt":2.94,
+              "pdt_tp_nm":"위탁","lon_bnc_amt":"","lon_byn_dt":""}]}
+"""
+
 private class ApiFixture {
     private val dir: File = Files.createTempDirectory("api").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 7 }, "HmacSHA256")
@@ -353,6 +362,22 @@ class NhApiTest {
             val h = balance.holdings.single()
 
             assertEquals("", h.productType)
+            assertFalse(h.onCredit)
+        }
+
+    @Test
+    fun `lon_bnc_amt 가 빈 문자열이어도 파싱은 성공하고 대출잔고는 0이다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(BALANCE_BLANK_LOAN_AMT_BODY)
+            }
+
+            val balance = f.api.balance(Account("20101036881"))
+            val h = balance.holdings.single()
+
+            assertEquals(0, h.loanAmt)
             assertFalse(h.onCredit)
         }
 

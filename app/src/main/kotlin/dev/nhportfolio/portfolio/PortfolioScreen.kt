@@ -157,7 +157,7 @@ class PortfolioViewModel(
                 plan = folded?.let { Rebalance.plan(it, targets) },
                 lastFill = fill,
                 error = error,
-                cashAssets = balance?.holdings.orEmpty().count { it.code in cashKeys },
+                cashAssets = balance?.holdings.orEmpty().count { it.key in cashKeys },
                 cashCodes = cashKeys,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())

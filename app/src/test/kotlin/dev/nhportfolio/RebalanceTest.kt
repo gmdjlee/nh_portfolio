@@ -62,13 +62,10 @@ class RebalanceTest {
     fun `현재가가 0 이면 델타는 null 이다`() {
         val a = holding("A", 3, 0, evalAmt = 0)
         val b = Balance(cash = 1_000_000, holdings = listOf(a))
-        assertNull(
-            Rebalance
-                .plan(b, mapOf(a.key to 5_000))
-                .lines
-                .first { it.key == a.key }
-                .deltaShares,
-        )
+        val plan = Rebalance.plan(b, mapOf(a.key to 5_000))
+        val line = plan.lines.first { it.key == a.key }
+        assertEquals(5_000, line.targetBp) // 목표가 실제로 걸렸음을 먼저 못 박는다 — 안 그러면 미매칭으로도 통과한다
+        assertNull(line.deltaShares)
     }
 
     @Test
@@ -530,5 +527,12 @@ class RebalanceTest {
         val b = holding("005930", qty = 50, price = 70_000).copy(productType = "신용융자")
         val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(a, b)), emptyMap())
         assertFalse(plan.duplicateKeys)
+    }
+
+    /** 일부 증권사 API 는 대출일자 없음을 "00000000" 으로 채워 보낸다 — 빈 문자열이 아니다. */
+    @Test
+    fun `대출매수일자가 전부 0 이면 신용이 아니다`() {
+        val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "00000000")
+        assertFalse(h.onCredit)
     }
 }

@@ -445,7 +445,9 @@ private data class HoldingDto(
     @SerialName("pft_rt") val pnlRate: Double = 0.0,
     // 신용/융자 구분. 상품유형명은 배지 문구로 그대로 쓰고, 대출 정보로 신용 여부를 판정한다.
     @SerialName("pdt_tp_nm") val productType: String = "",
-    @SerialName("lon_bnc_amt") val loanAmt: Long = 0,
+    // NH 는 대출이 없는 일반 매수분에서 이 필드를 빈 문자열로 내려준다 — Long 이면 "" 를
+    // 못 읽어 잔고 조회 전체가 죽는다(coerceInputValues/isLenient 둘 다 빈 문자열은 못 구한다).
+    @SerialName("lon_bnc_amt") val loanAmt: String = "",
     @SerialName("lon_byn_dt") val loanDate: String = "",
 ) {
     fun toHolding() =
@@ -459,7 +461,7 @@ private data class HoldingDto(
             evalAmt = evalAmt,
             pnlRate = pnlRate,
             productType = productType,
-            loanAmt = loanAmt,
+            loanAmt = loanAmt.toLongOrNull() ?: 0,
             loanDate = loanDate,
         )
 }

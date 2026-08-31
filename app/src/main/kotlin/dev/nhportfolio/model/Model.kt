@@ -51,8 +51,12 @@ data class Holding(
     /**
      * 신용/융자로 산 줄인가. 상품유형명 문자열을 비교하지 않는다 — 현금분의 이름이
      * 무엇인지 모르는 채로 하드코딩하면 배지가 전부 붙거나 하나도 안 붙는다.
+     *
+     * 날짜는 `isNotBlank()` 가 아니라 "0 아닌 글자가 있는가"로 본다 — 일부 증권사 API 는
+     * 날짜가 없을 때 빈 문자열 대신 "00000000" 을 채워 보낸다. `isNotBlank()` 면 그 값도
+     * true 로 잡혀 전 종목에 배지가 붙는다.
      */
-    val onCredit: Boolean get() = loanAmt > 0 || loanDate.isNotBlank()
+    val onCredit: Boolean get() = loanAmt > 0 || loanDate.any { it != '0' }
 }
 
 /** [cash] 는 D+2 예수금 — 당일 체결이 즉시 반영된다. */
