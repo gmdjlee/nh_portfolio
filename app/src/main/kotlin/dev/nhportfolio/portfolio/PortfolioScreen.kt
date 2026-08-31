@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -695,7 +696,11 @@ private fun SummaryCard(
                 valueColor =
                     when {
                         plan.targetSumBp > FULL_BP -> MaterialTheme.colorScheme.error
-                        plan.targetSumBp == FULL_BP -> MaterialTheme.colorScheme.primary
+
+                        // 신원이 겹치면 100% 도 우연일 뿐이다 — 바로 아래 뜨는 중복 경고와
+                        // 화면이 모순되지 않도록 초록으로 안심시키지 않는다.
+                        plan.targetSumBp == FULL_BP && !plan.duplicateKeys -> MaterialTheme.colorScheme.primary
+
                         else -> MaterialTheme.colorScheme.onSurface
                     },
                 modifier = Modifier.weight(1f),
@@ -859,7 +864,15 @@ private fun HoldingRow(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f, fill = false),
                 ) {
-                    Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
+                    // weight 는 래퍼가 아니라 이름 Text 에 줘야 한다 — 래퍼에만 있으면 이름이
+                    // 폭 전체를 먼저 가져가 버려 배지가 0dp 로 밀려 사라질 수 있다.
+                    Text(
+                        holding?.name ?: cashLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     // 신용/융자 줄에만. 문구는 NH 가 준 상품유형명을 그대로 쓴다 —
                     // 우리가 지어낸 말보다 실제와 어긋날 위험이 없다.
                     if (holding?.onCredit == true) CreditChip(holding.productType)

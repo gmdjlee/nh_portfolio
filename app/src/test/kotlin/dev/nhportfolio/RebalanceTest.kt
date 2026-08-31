@@ -494,6 +494,44 @@ class RebalanceTest {
         }
     }
 
+    // ---- 고아 목표 (신용상환 등으로 키가 바뀌어 현재 비중에 없는 목표, F2) ----
+
+    @Test
+    fun `현재 비중에 없는 목표 키는 자리를 받지 못하고 살아있는 종목이 room 을 채운다`() {
+        val out =
+            Rebalance.scaleForCash(
+                targetsBp = mapOf("GHOST" to 3000, "B" to 7000),
+                cashBp = 0,
+                currentWeightsBp = mapOf("B" to 5000),
+            )
+
+        assertFalse("GHOST" in out, "고아 목표가 자리를 받았다: $out")
+        assertEquals(10_000, out.getValue("B"))
+    }
+
+    @Test
+    fun `상환으로 고아가 된 목표는 100퍼센트로 맞추기를 눌러도 살아있는 종목만으로 room 을 채운다`() {
+        // F2 재현: 신용상환으로 "005930|신용융자" 키가 사라지고 "005930|위탁" 으로 남았다.
+        // 고아가 된 옛 목표가 room 을 나눠 가지면 살아있는 종목의 목표 합이 room 에 못 미친다
+        // — 목표 합계 화면이 "100%로 맞추기" 를 눌러도 채워지지 않는 것처럼 보인다.
+        val targets = mapOf("005930|신용융자" to 2000, "000660" to 6000)
+        val current = mapOf("005930|위탁" to 2500, "000660" to 7500)
+
+        val out = Rebalance.normalize(targets, current)
+
+        assertFalse("005930|신용융자" in out, "고아 목표가 자리를 차지했다: $out")
+        assertEquals(10_000, out.values.sum(), "살아있는 종목의 목표 합이 room 을 정확히 채우지 못했다: $out")
+    }
+
+    @Test
+    fun `currentWeightsBp 가 비어 있으면 고아 여부를 판단할 수 없어 목표를 그대로 둔다`() {
+        // 데이터 손실 방지 장치: 잔고를 아직 못 받았을 때(currentWeightsBp 가 비어 있을 때)
+        // 걸러내면 사용자가 잡아 둔 목표를 통째로 지우게 된다.
+        val out = Rebalance.scaleForCash(mapOf("GHOST" to 3000, "B" to 7000), cashBp = 0)
+
+        assertEquals(mapOf("GHOST" to 3000, "B" to 7000, Rebalance.CASH to 0), out)
+    }
+
     // ---- 신원(key) ----
 
     /** 같은 종목코드가 현금분·신용분으로 두 줄 오면 목표가 각각 걸려야 한다. */
@@ -533,6 +571,13 @@ class RebalanceTest {
     @Test
     fun `대출매수일자가 전부 0 이면 신용이 아니다`() {
         val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "00000000")
+        assertFalse(h.onCredit)
+    }
+
+    /** 고정폭 필드는 "없음" 을 0 대신 공백으로 채워 보낼 수도 있다 — `!= '0'` 이면 공백도 걸린다. */
+    @Test
+    fun `대출매수일자가 공백으로 채워져도 신용이 아니다`() {
+        val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "        ")
         assertFalse(h.onCredit)
     }
 }

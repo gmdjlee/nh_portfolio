@@ -2,6 +2,7 @@ package dev.nhportfolio
 
 import androidx.datastore.preferences.core.emptyPreferences
 import dev.nhportfolio.store.cashKey
+import dev.nhportfolio.store.clearLegacyKeys
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
@@ -51,5 +52,21 @@ class PrefsTest {
         prefs[key] = "이건 JSON 이 아니다"
 
         assertEquals(emptySet(), readCashCodes(prefs, key))
+    }
+
+    @Test
+    fun `clearLegacyKeys 는 살아있는 키를 건드리지 않는다`() {
+        // accountKey 가 private 이라 지워지는 legacy 키 자체는 여기서 못 만든다 — 대신
+        // 살아있는 키(targetsKey·cashKey)가 절대 건드려지지 않는다는 것으로 안전을 확인한다.
+        // 옛 접두사와 새 접두사가 뒤바뀌면 앱을 열 때마다 방금 잡은 목표가 통째로 사라진다.
+        val acctNo = "111"
+        val prefs = emptyPreferences().toMutablePreferences()
+        prefs[targetsKey(acctNo)] = """{"005930":5000}"""
+        prefs[cashKey(acctNo)] = """["005930"]"""
+
+        clearLegacyKeys(prefs, acctNo)
+
+        assertEquals("""{"005930":5000}""", prefs[targetsKey(acctNo)])
+        assertEquals("""["005930"]""", prefs[cashKey(acctNo)])
     }
 }

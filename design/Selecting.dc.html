@@ -99,13 +99,13 @@ class Component extends DCLogic {
     const none = { boxBorder: '#FFFFFF', boxFill: '#FFFFFF', selectable: false };
     return {
       rows: [
-        { name: '현대차', amt: '35,617,500', sub: '보유 150주 · 잔고 150주 · 평균 233,000 · 현재 237,450', pl: '+7.44%', plc: R, bg: '#F4F7F5',
+        { name: '현대차', amt: '35,617,500', sub: '보유 150주 · 잔고 150주 · 평균 221,000 · 현재 237,450', pl: '+7.44%', plc: R, bg: '#F4F7F5',
           wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy, ...on },
         // 삼성전자는 현금분·신용분 두 줄로 온다 — 평가금액·평균가·목표가 각자 독립이고, 체크 상태도 따로 논다.
         // 현금분만 고른 채로 둬서 두 줄이 독립적으로 선택된다는 것을 보여준다.
-        { name: '삼성전자', amt: '11,130,000', sub: '보유 150주 · 잔고 150주 · 평균 68,400 · 현재 74,200', pl: '+8.48%', plc: R, bg: '#F4F7F5',
+        { name: '삼성전자', amt: '11,130,000', sub: '보유 150주 · 잔고 150주 · 평균 60,000 · 현재 74,200', pl: '+23.67%', plc: R, bg: '#F4F7F5',
           wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy, ...on },
-        { name: '삼성전자', amt: '7,420,000', sub: '보유 100주 · 잔고 100주 · 평균 79,000 · 현재 74,200', pl: '-6.08%', plc: B, bg: '#FFFFFF',
+        { name: '삼성전자', amt: '7,420,000', sub: '보유 100주 · 잔고 100주 · 평균 81,000 · 현재 74,200', pl: '-8.40%', plc: B, bg: '#FFFFFF',
           wNow: '19%', wTgt: '20%', wLabel: '7.42% → 8.00%', delta: '8주 매수', credit: true, creditLabel: '신용융자', ...buy, ...off },
         { name: '카카오', amt: '13,245,000', sub: '보유 300주 · 잔고 300주 · 평균 52,300 · 현재 44,150', pl: '-15.58%', plc: B, bg: '#F4F7F5',
           wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell, ...on },

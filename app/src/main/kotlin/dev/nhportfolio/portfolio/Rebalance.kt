@@ -82,15 +82,24 @@ object Rebalance {
     /**
      * 종목 목표들을 합이 정확히 [room] 이 되도록 비례 조정한다. 예수금 행은 건드리지 않는다.
      * 목표가 없는 종목은 [currentWeightsBp] 의 현재 비중을 출발점으로 삼는다.
+     *
+     * [currentWeightsBp] 에 없는 목표 키(고아)는 room 을 나눠 갖지 못한다 — 신용상환처럼
+     * 종목은 그대로인데 신원(`종목코드|상품유형명`)만 바뀌면 옛 목표가 고아가 되고,
+     * 그대로 두면 살아있는 종목들이 매번 room 을 다 못 채운다.
+     *
+     * [currentWeightsBp] 가 비어 있을 때는 걸러내지 않는다 — 잔고를 아직 못 받아 무엇이
+     * 살아있는 키인지 모르는 것뿐이라, 이때 걸러내면 사용자가 잡아 둔 목표를 통째로 지운다.
      */
     private fun scaleStocks(
         targetsBp: Map<String, Int>,
         currentWeightsBp: Map<String, Int>,
         room: Int,
     ): Map<String, Int> {
-        val stocks = currentWeightsBp.filterKeys { it != CASH } + targetsBp.filterKeys { it != CASH }
+        val liveTargets =
+            if (currentWeightsBp.isEmpty()) targetsBp else targetsBp.filterKeys { it in currentWeightsBp }
+        val stocks = currentWeightsBp.filterKeys { it != CASH } + liveTargets.filterKeys { it != CASH }
         val sum = stocks.values.sum()
-        if (sum <= 0) return targetsBp.filterKeys { it != CASH }
+        if (sum <= 0) return liveTargets.filterKeys { it != CASH }
 
         val target = room.toLong()
         // 단순 비례하면 정수 절삭 때문에 합이 room 에서 어긋난다. 바닥값을 깔고 남은 몫을
