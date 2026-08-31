@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .td { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .td .cap { font-size: 11px; font-weight: 700; color: #6E7481; letter-spacing: .06em; }
+    .td .dlg { background: #FFFFFF; border-radius: 22px; padding: 22px 22px 14px; box-shadow: 0 18px 44px rgba(17,18,20,.20); }
+    .td .name { font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+    .td .sub { font-size: 12px; font-weight: 500; color: #8A9099; }
+    .td .btn { font-size: 14px; font-weight: 700; color: #3F6B4A; padding: 9px 12px; }
+    .td .num { font-weight: 700; letter-spacing: -.03em; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="td" style="width: 820px; height: 600px; background: #E7EAEE; color: #111214; display: flex; gap: 30px; padding: 20px; box-sizing: border-box;">
+
+  <div style="width: 390px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+    <span class="cap">기본 — 단건 편집</span>
+    <div style="flex: 1; border-radius: 14px; overflow: hidden; position: relative; background: #FFFFFF;">
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 16px; opacity: .5;">
+        <div style="height: 34px; width: 62%; border-radius: 6px; background: #E9ECF0;"></div>
+        <div style="height: 52px; border-radius: 10px; background: #F1F3F6;"></div>
+        <div style="height: 46px; border-radius: 6px; background: #F1F3F6;"></div>
+        <div style="height: 46px; border-radius: 6px; background: #F1F3F6;"></div>
+        <div style="height: 46px; border-radius: 6px; background: #F1F3F6;"></div>
+      </div>
+      <div style="position: absolute; inset: 0; background: rgba(17,18,20,.44); display: flex; align-items: center; justify-content: center; padding: 0 18px;">
+        <div class="dlg" style="width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <span class="name">현대차</span>
+            <span class="sub">목표 비중</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 7px;">
+            <div style="height: 62px; border: 1.5px solid #3F6B4A; border-radius: 12px; display: flex; align-items: baseline; padding: 0 16px;">
+              <span class="num" style="font-size: 30px; line-height: 62px;">40.00</span>
+              <span style="flex: 1;"></span>
+              <span style="font-size: 17px; font-weight: 500; color: #8A9099; line-height: 62px;">%</span>
+            </div>
+            <span class="sub" style="padding-left: 2px;">0 ~ 100 사이 숫자를 입력하세요</span>
+          </div>
+          <div style="height: 1px; background: #EDEFF2;"></div>
+          <div style="display: flex; align-items: center; min-height: 30px;">
+            <span style="font-size: 14px; font-weight: 500;">현금성 자산으로 묶기</span>
+            <span style="flex: 1;"></span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B4BAC4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+          <div style="display: flex; align-items: center; margin-top: -4px;">
+            <span class="btn" style="color: #B3412F; padding-left: 0;">목표 삭제</span>
+            <span style="flex: 1;"></span>
+            <span class="btn" style="color: #6E7481;">취소</span>
+            <span class="btn">저장</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 18px;">
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span class="cap">오류 — 범위 밖 입력</span>
+      <div class="dlg" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span class="name">카카오</span>
+          <span class="sub">목표 비중</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 62px; border: 1.5px solid #B3412F; border-radius: 12px; display: flex; align-items: baseline; padding: 0 16px;">
+            <span class="num" style="font-size: 30px; line-height: 62px; color: #B3412F;">140</span>
+            <span style="flex: 1;"></span>
+            <span style="font-size: 17px; font-weight: 500; color: #B3412F; line-height: 62px;">%</span>
+          </div>
+          <span style="font-size: 12px; font-weight: 500; color: #B3412F; padding-left: 2px;">0 ~ 100 사이 숫자를 입력하세요</span>
+        </div>
+        <div style="display: flex; align-items: center; margin-top: -2px;">
+          <span class="btn" style="color: #B3412F; padding-left: 0;">목표 삭제</span>
+          <span style="flex: 1;"></span>
+          <span class="btn" style="color: #6E7481;">취소</span>
+          <span class="btn" style="color: #B4BAC4;">저장</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span class="cap">일괄 — 여러 종목을 고른 뒤</span>
+      <div class="dlg" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span class="name">선택한 3개 종목</span>
+          <span class="sub">목표 비중 — 고른 종목 각각에 적용됩니다</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 7px;">
+          <div style="height: 62px; border: 1px solid #D6DBE2; border-radius: 12px; display: flex; align-items: baseline; padding: 0 16px;">
+            <span class="num" style="font-size: 30px; line-height: 62px; color: #B4BAC4;">0</span>
+            <span style="flex: 1;"></span>
+            <span style="font-size: 17px; font-weight: 500; color: #8A9099; line-height: 62px;">%</span>
+          </div>
+          <span class="sub" style="padding-left: 2px;">0 ~ 100 사이 숫자를 입력하세요</span>
+        </div>
+        <div style="display: flex; align-items: center; margin-top: -2px;">
+          <span style="flex: 1;"></span>
+          <span class="btn" style="color: #6E7481;">취소</span>
+          <span class="btn" style="color: #B4BAC4;">저장</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

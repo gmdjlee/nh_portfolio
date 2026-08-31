@@ -12,60 +12,78 @@
     body { margin: 0; }
     .b { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
     .b .num { font-weight: 700; letter-spacing: -.025em; }
+    .b .lab { font-size: 11px; font-weight: 500; color: #8A9099; }
+    .b .dlab { font-size: 12px; font-weight: 500; color: #8A9099; }
+    .b .dat { font-size: 14px; font-weight: 600; letter-spacing: -.02em; color: #3E4550; }
     a { color: #3F6B4A; } a:hover { color: #2F4A34; }
   </style>
 </helmet>
 <div class="b" style="width: 390px; height: 844px; background: #FFFFFF; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
 
-  <div style="padding: 14px 16px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #EDEFF2;">
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111214" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-      <span style="font-size: 15px; font-weight: 700;">20101036881</span>
+  <div style="height: 52px; padding: 0 6px 0 10px; display: flex; align-items: center; gap: 4px; border-bottom: 1px solid #EDEFF2; flex-shrink: 0;">
+    <div style="height: 44px; padding: 0 10px; display: flex; align-items: center;">
+      <span style="font-size: 14px; font-weight: 700; color: #3F6B4A;">뒤로</span>
     </div>
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3F6B4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+    <span class="num" style="font-size: 15px; letter-spacing: 0;">20101036881</span>
+    <span style="flex: 1;"></span>
+    <div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3F6B4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+    </div>
   </div>
 
-  <div style="padding: 15px 16px 13px; display: flex; flex-direction: column; gap: 11px; border-bottom: 8px solid #F4F6F8;">
-    <div style="display: flex; flex-direction: column; gap: 1px;">
+  <div style="padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 12px; border-bottom: 8px solid #F4F6F8; flex-shrink: 0;">
+    <div style="display: flex; flex-direction: column; gap: 2px;">
       <div style="display: flex; align-items: baseline; justify-content: space-between;">
-        <span style="font-size: 12px; font-weight: 500; color: #6E7481;">총 평가금액</span>
-        <span style="font-size: 12px; color: #6E7481;">6종목</span>
+        <span class="lab">총 평가금액</span>
+        <span class="lab">6종목</span>
       </div>
-      <span class="num" style="font-size: 33px; line-height: 1.08;">100,000,000</span>
+      <span class="num" style="font-size: 34px; line-height: 1.06; letter-spacing: -.035em;">100,000,000</span>
       <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500 (+4.36%)</span>
     </div>
     <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
-      <div style="background: #F4F6F8; border-radius: 10px; padding: 9px 12px; display: flex; flex-direction: column; gap: 1px;">
-        <span style="font-size: 11px; color: #6E7481;">현금 (D+2)</span>
-        <span class="num" style="font-size: 16px;">10,000,000</span>
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;">
+        <span class="lab">현금 (D+2)</span>
+        <span class="num" style="font-size: 17px;">10,000,000</span>
       </div>
-      <div style="background: #F4F6F8; border-radius: 10px; padding: 9px 12px; display: flex; flex-direction: column; gap: 1px;">
-        <span style="font-size: 11px; color: #6E7481;">목표 합계</span>
-        <span class="num" style="font-size: 16px; color: #1B7A46;">100.00%</span>
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;">
+        <span class="lab">목표 합계</span>
+        <span class="num" style="font-size: 17px; color: #3F6B4A;">100.00%</span>
       </div>
     </div>
   </div>
 
   <div style="flex: 1; overflow: hidden;">
     <sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
-      <div style="padding: 10px 16px 11px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: baseline;">
-        <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-          <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
-          <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
-            <span style="font-size: 10px; font-weight: 700; color: #6A5B4B; background: #F2EEE9; padding: 2px 6px; border-radius: 5px; white-space: nowrap;">{{r.creditLabel}}</span>
-          </sc-if>
-        </span>
-        <span class="num" style="font-size: 17px; text-align: right;">{{r.amt}}</span>
-        <span style="font-size: 12px; color: #6E7481;">{{r.sub}}</span>
-        <span class="num" style="font-size: 13px; color: {{r.plc}}; text-align: right;">{{r.pl}}</span>
-        <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; margin-top: 3px;">
-          <div style="width: 64px; height: 7px; border-radius: 4px; background: #EDEFF2; position: relative; flex-shrink: 0;">
-            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.wNow}}; border-radius: 4px; background: #A9B2BF;"></div>
-            <div style="position: absolute; top: -3px; bottom: -3px; left: {{r.wTgt}}; width: 2px; background: #111214;"></div>
-          </div>
-          <span class="num" style="font-size: 12px; color: #444B57;">{{r.wLabel}}</span>
+      <div style="padding: 12px 16px 13px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: flex; flex-direction: column; gap: 5px;">
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+            <span style="font-size: 16px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{r.name}}</span>
+            <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
+              <span style="font-size: 10px; font-weight: 700; color: #A6273F; background: #FBE9EC; padding: 2px 6px; border-radius: 5px; white-space: nowrap; flex-shrink: 0;">{{r.creditLabel}}</span>
+            </sc-if>
+          </span>
           <span style="flex: 1;"></span>
-          <span class="num" style="font-size: 13px; font-weight: 700; color: {{r.dc}}; background: {{r.dbg}}; padding: 3px 9px; border-radius: 7px;">{{r.delta}}</span>
+          <span style="display: flex; align-items: baseline; gap: 9px; white-space: nowrap; flex-shrink: 0;">
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.qtyLabel}}</span><span class="dat">{{r.qty}}</span></span>
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.avgLabel}}</span><span class="dat">{{r.avg}}</span></span>
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.nowLabel}}</span><span class="dat">{{r.now}}</span></span>
+          </span>
+        </div>
+
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span class="num" style="font-size: 19px;">{{r.amt}}</span>
+          <span class="num" style="font-size: 14px; color: {{r.plc}};">{{r.pl}}</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; margin-top: 2px;">
+          <div style="width: 150px; height: 8px; border-radius: 4px; background: #EDEFF2; position: relative; flex-shrink: 0;">
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.wNow}}; border-radius: 4px; background: #A9B2BF;"></div>
+            <div style="position: absolute; top: -4px; bottom: -4px; left: {{r.wTgt}}; width: 2.5px; border-radius: 1px; background: #111214;"></div>
+          </div>
+          <span class="num" style="font-size: 12px; color: #444B57; white-space: nowrap;">{{r.wLabel}}</span>
+          <span style="flex: 1;"></span>
+          <span class="num" style="font-size: 12.5px; color: {{r.dc}}; background: {{r.dbg}}; padding: 3px 9px; border-radius: 7px; white-space: nowrap;">{{r.delta}}</span>
         </div>
       </div>
     </sc-for>
@@ -80,24 +98,35 @@ class Component extends DCLogic {
     const buy = { dc: '#B5372C', dbg: '#FBE9E7' };
     const sell = { dc: '#255BB8', dbg: '#E8EFFB' };
     const flat = { dc: '#6E7481', dbg: '#F1F3F5' };
+    // 명세 세 항목은 이름과 같은 줄로 올라왔다. 라벨은 작고 흐리게, 숫자는 크고 진하게 —
+    // 한 줄에 여섯 조각이 들어가도 숫자만 먼저 읽힌다.
+    const d = (qty, avg, now) => ({ qtyLabel: '잔고', qty, avgLabel: '평균', avg, nowLabel: '현재', now });
     // 눈금은 가장 큰 목표(40%)를 100% 로 잡은 상대 척도 — 목표선이 기준을 알려 준다.
     return {
       rows: [
-        { name: '현대차', amt: '35,617,500', sub: '150주 · 237,450', pl: '+7.44%', plc: R, bg: '#FFFFFF',
+        { name: '현대차', amt: '35,617,500', ...d('150주', '221,000', '237,450'),
+          pl: '+7.44%', plc: R, bg: '#FFFFFF',
           wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy },
-        // 삼성전자는 현금분·신용분 두 줄로 온다 — 같은 종목코드, 다른 상품유형명.
+        // 삼성전자는 현금분·신용분 두 줄로 온다 — 같은 종목코드, 다른 대출 여부.
         // 평가금액·평균가·목표가 각자 독립이라 한쪽을 조정해도 다른 쪽은 그대로다.
-        { name: '삼성전자', amt: '11,130,000', sub: '150주 · 74,200', pl: '+23.67%', plc: R, bg: '#FFFFFF',
+        { name: '삼성전자', amt: '11,130,000', ...d('150주', '60,000', '74,200'),
+          pl: '+23.67%', plc: R, bg: '#FFFFFF',
           wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy },
-        { name: '삼성전자', amt: '7,420,000', sub: '100주 · 74,200', pl: '-8.40%', plc: B, bg: '#FFFFFF',
+        { name: '삼성전자', amt: '7,420,000', ...d('100주', '81,000', '74,200'),
+          pl: '-8.40%', plc: B, bg: '#FFFFFF',
           wNow: '19%', wTgt: '20%', wLabel: '7.42% → 8.00%', delta: '8주 매수', credit: true, creditLabel: '신용융자', ...buy },
-        { name: '카카오', amt: '13,245,000', sub: '300주 · 44,150', pl: '-15.58%', plc: B, bg: '#FFFFFF',
+        { name: '카카오', amt: '13,245,000', ...d('300주', '52,300', '44,150'),
+          pl: '-15.58%', plc: B, bg: '#FFFFFF',
           wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell },
-        { name: 'SK하이닉스', amt: '11,670,000', sub: '60주 · 194,500', pl: '+9.27%', plc: R, bg: '#FFFFFF',
+        { name: 'SK하이닉스', amt: '11,670,000', ...d('60주', '178,000', '194,500'),
+          pl: '+9.27%', plc: R, bg: '#FFFFFF',
           wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', credit: false, creditLabel: '', ...sell },
-        { name: 'NAVER', amt: '10,917,500', sub: '55주 · 198,500', pl: '-7.67%', plc: B, bg: '#FFFFFF',
+        { name: 'NAVER', amt: '10,917,500', ...d('55주', '215,000', '198,500'),
+          pl: '-7.67%', plc: B, bg: '#FFFFFF',
           wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', credit: false, creditLabel: '', ...sell },
-        { name: '현금', amt: '10,000,000', sub: '예수금 D+2', pl: '', plc: '#6E7481', bg: '#FAFBFC',
+        // 예수금 행에는 명세가 없다 — 라벨 자리에 예수금이 무엇인지만 적는다.
+        { name: '현금', amt: '10,000,000', qtyLabel: '', qty: '', avgLabel: '', avg: '', nowLabel: '예수금', now: 'D+2',
+          pl: '', plc: '#6E7481', bg: '#FAFBFC',
           wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', credit: false, creditLabel: '', ...flat },
       ],
     };
