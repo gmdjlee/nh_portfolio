@@ -78,6 +78,12 @@ internal val BarFill = Color(0xFFA9B2BF)
 internal val BarTrackDark = Color(0xFF232A34)
 internal val BarFillDark = Color(0xFF5A6472)
 
+/** 신용/융자 배지. 손익·조작·구성 파이가 쓰는 색을 모두 피한 중성색 — 배지는 경고가 아니라 분류다. */
+internal val CreditInk = Color(0xFF6A5B4B)
+internal val CreditSurface = Color(0xFFF2EEE9)
+internal val CreditInkDark = Color(0xFFC8B69F)
+internal val CreditSurfaceDark = Color(0xFF2A241E)
+
 private val LightScheme =
     lightColorScheme(
         primary = Moss,

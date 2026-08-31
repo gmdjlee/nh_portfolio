@@ -69,6 +69,7 @@ import dev.nhportfolio.ui.CloseIcon
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
+import dev.nhportfolio.ui.creditChipColors
 import dev.nhportfolio.ui.deltaChipColors
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
@@ -116,7 +117,7 @@ data class PortfolioUi(
     val error: String? = null,
     /** 현금 행에 합쳐진 현금성 자산 개수. 0 이면 순수 예수금이다. */
     val cashAssets: Int = 0,
-    val cashCodes: Set<String> = emptySet(),
+    val cashKeys: Set<String> = emptySet(),
 )
 
 class PortfolioViewModel(
@@ -164,7 +165,7 @@ class PortfolioViewModel(
                 lastFill = fill,
                 error = error,
                 cashAssets = balance?.holdings.orEmpty().count { it.key in cashKeys },
-                cashCodes = cashKeys,
+                cashKeys = cashKeys,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
@@ -443,7 +444,7 @@ fun PortfolioScreen(
             codes = codes,
             currentBp = currentBp,
             holdings = ui.balance?.holdings.orEmpty(),
-            cashCodes = ui.cashCodes,
+            cashKeys = ui.cashKeys,
             onToggleCash = { code ->
                 vm.toggleCashAsset(code)
                 editing = null
@@ -496,13 +497,31 @@ private fun PortfolioTopBar(
     }
 }
 
+/**
+ * 단건 편집 다이얼로그 제목에 쓸 종목명. 같은 종목코드가 현금분·신용분 두 줄로 갈리면
+ * 상품유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을
+ * 고치는지 알 수 없다. 문구는 NH 가 준 상품유형명([Holding.productType]) 그대로 쓴다.
+ */
+internal fun holdingTitle(
+    holdings: List<Holding>,
+    key: String,
+): String {
+    val holding = holdings.firstOrNull { it.key == key } ?: return key
+    val duplicateCode = holdings.count { it.code == holding.code } > 1
+    return if (duplicateCode && holding.productType.isNotBlank()) {
+        "${holding.name} (${holding.productType})"
+    } else {
+        holding.name
+    }
+}
+
 /** 단건이면 종목 이름을, 일괄이면 개수를 제목에 쓴다. */
 @Composable
 private fun TargetEditor(
     codes: List<String>,
     currentBp: Int?,
     holdings: List<Holding>,
-    cashCodes: Set<String>,
+    cashKeys: Set<String>,
     onToggleCash: (String) -> Unit,
     onDismiss: () -> Unit,
     onSet: (Int?) -> Unit,
@@ -512,13 +531,13 @@ private fun TargetEditor(
         when {
             single == null -> "선택한 ${codes.size}개 종목"
             single == Rebalance.CASH -> "예수금"
-            else -> holdings.firstOrNull { it.code == single }?.name ?: single
+            else -> holdingTitle(holdings, single)
         }
     // 현금성 지정은 단건, 그것도 실제 종목에만 — 예수금 행이나 일괄 편집에는 뜻이 없다.
     val cashToggle =
         single
             ?.takeIf { it != Rebalance.CASH }
-            ?.let { CashToggle(isCash = it in cashCodes, onClick = { onToggleCash(it) }) }
+            ?.let { CashToggle(isCash = it in cashKeys, onClick = { onToggleCash(it) }) }
     TargetDialog(
         name = name,
         currentBp = currentBp,
@@ -725,6 +744,13 @@ private fun PlanWarnings(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        if (plan.duplicateKeys) {
+            Text(
+                "같은 종목이 구분 없이 두 번 왔습니다 — 목표 비중이 두 줄에 겹쳐 매매 수량이 부풀 수 있습니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
@@ -828,7 +854,16 @@ private fun HoldingRow(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
+                    // 신용/융자 줄에만. 문구는 NH 가 준 상품유형명을 그대로 쓴다 —
+                    // 우리가 지어낸 말보다 실제와 어긋날 위험이 없다.
+                    if (holding?.onCredit == true) CreditChip(holding.productType)
+                }
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
             HoldingDetail(line, holding, scaleBp)
@@ -901,6 +936,21 @@ private fun DeltaChip(delta: Long?) {
             Modifier
                 .background(c.surface, MaterialTheme.shapes.extraSmall)
                 .padding(horizontal = 9.dp, vertical = 3.dp),
+    )
+}
+
+/** 신용/융자 배지. 문구가 비어 있으면 "신용" 으로 대신한다 — 빈 칩은 뜻이 없다. */
+@Composable
+private fun CreditChip(productType: String) {
+    val c = creditChipColors()
+    Text(
+        text = productType.takeIf { it.isNotBlank() } ?: "신용",
+        style = MaterialTheme.typography.labelSmall,
+        color = c.ink,
+        modifier =
+            Modifier
+                .background(c.surface, MaterialTheme.shapes.extraSmall)
+                .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
 
