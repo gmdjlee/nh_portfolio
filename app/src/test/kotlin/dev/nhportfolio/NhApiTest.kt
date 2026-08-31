@@ -72,6 +72,15 @@ private const val BALANCE_BODY = """
               "phs_pr":68000,"now_pr":70000,"eal_amt":700000,"pft_rt":2.94}]}
 """
 
+/** 같은 종목코드가 신용/융자 매수분으로 온 경우 — pdt_tp_nm·lon_bnc_amt·lon_byn_dt 가 실려 있다. */
+private const val BALANCE_CREDIT_BODY = """
+{"rsp_cd":"00000","rsp_msg":"조회가 완료되었습니다.",
+ "Output_0":{"dca":111,"nxt2_dd_dca":500000,"tot_eal_amt":350000},
+ "Output_1":[{"iem_cd":"005930","iem_nm":"삼성전자","itg_bnc_qty":5.0,"rsdl_qty":5.0,
+              "phs_pr":68000,"now_pr":70000,"eal_amt":350000,"pft_rt":2.94,
+              "pdt_tp_nm":"신용융자","lon_bnc_amt":1000000,"lon_byn_dt":"20260115"}]}
+"""
+
 private class ApiFixture {
     private val dir: File = Files.createTempDirectory("api").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 7 }, "HmacSHA256")
@@ -315,6 +324,36 @@ class NhApiTest {
             assertTrue("\"bnc_bse_cd\":\"1\"" in body, body)
             assertTrue("\"ltg_aot_dit_cd\":\"1\"" in body, body)
             assertTrue("\"aet_bse\":\"1\"" in body, body)
+        }
+
+    @Test
+    fun `신용융자 필드가 있으면 상품유형과 대출 정보가 실리고 신용으로 판정한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(BALANCE_CREDIT_BODY) }
+
+            val balance = f.api.balance(Account("20101036881"))
+            val h = balance.holdings.single()
+
+            assertEquals("신용융자", h.productType)
+            assertEquals(1_000_000, h.loanAmt)
+            assertEquals("20260115", h.loanDate)
+            assertTrue(h.onCredit)
+        }
+
+    @Test
+    fun `신용 필드가 통째로 없어도 파싱은 성공하고 신용이 아니다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(BALANCE_BODY) }
+
+            val balance = f.api.balance(Account("20101036881"))
+            val h = balance.holdings.single()
+
+            assertEquals("", h.productType)
+            assertFalse(h.onCredit)
         }
 
     @Test

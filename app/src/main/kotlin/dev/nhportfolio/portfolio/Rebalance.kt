@@ -8,7 +8,7 @@ import dev.nhportfolio.model.Balance
  * 비중 단위는 basis point (1250 = 12.50%). 분모는 `예수금 + Σ 평가금액`.
  */
 object Rebalance {
-    /** 현금 행의 코드. 종목코드가 될 수 없는 값이어야 한다 (NASDAQ 에 "CASH" 티커가 실재한다). */
+    /** 현금 행의 신원. 어떤 `종목코드|상품유형명` 과도 겹치지 않아야 한다. */
     const val CASH = "\$CASH"
 
     private const val FULL_BP = 10_000
@@ -16,7 +16,7 @@ object Rebalance {
 
     /** [deltaShares] 가 null 이면 목표가 없거나 현재가가 0 이하라 계산할 수 없다는 뜻이다. */
     data class Line(
-        val code: String,
+        val key: String,
         val currentAmt: Long,
         val weightBp: Int,
         val targetBp: Int?,
@@ -36,6 +36,8 @@ object Rebalance {
         val targetSumBp: Int,
         val totalPl: Long = 0,
         val totalPlRate: Double = 0.0,
+        /** 신원이 겹치는 줄이 있으면 true — 목표가 두 줄에 같이 걸려 수량이 두 배가 된다. */
+        val duplicateKeys: Boolean = false,
     )
 
     /**
@@ -103,7 +105,7 @@ object Rebalance {
     }
 
     /**
-     * [cashCodes] 로 지정한 종목을 현금에 합치고 보유 목록에서 뺀다.
+     * [cashKeys] 로 지정한 종목을 현금에 합치고 보유 목록에서 뺀다.
      *
      * NH 는 CMA 발행어음 같은 현금성 상품도 잔고의 보유 종목(Output_1)으로 내려준다 —
      * balance 응답의 요약 블록에는 예수금 계열밖에 없다. 그대로 두면 주식처럼 취급되어
@@ -116,10 +118,10 @@ object Rebalance {
      */
     fun foldCash(
         balance: Balance,
-        cashCodes: Set<String>,
+        cashKeys: Set<String>,
     ): Balance {
-        if (cashCodes.isEmpty()) return balance
-        val (cashLike, rest) = balance.holdings.partition { it.code in cashCodes }
+        if (cashKeys.isEmpty()) return balance
+        val (cashLike, rest) = balance.holdings.partition { it.key in cashKeys }
         if (cashLike.isEmpty()) return balance
         return Balance(cash = balance.cash + cashLike.sumOf { it.evalAmt }, holdings = rest)
     }
@@ -134,7 +136,7 @@ object Rebalance {
         var spend = 0L
         val holdingLines =
             balance.holdings.map { h ->
-                val targetBp = targetsBp[h.code]
+                val targetBp = targetsBp[h.key]
                 val delta =
                     if (targetBp == null || h.price <= 0) {
                         null
@@ -142,7 +144,7 @@ object Rebalance {
                         total * targetBp / FULL_BP / h.price - h.qty
                     }
                 if (delta != null) spend += delta * h.price
-                Line(h.code, h.evalAmt, weightBp(h.evalAmt, total), targetBp, delta)
+                Line(h.key, h.evalAmt, weightBp(h.evalAmt, total), targetBp, delta)
             }
         val lines = holdingLines + Line(CASH, balance.cash, weightBp(balance.cash, total), targetsBp[CASH], null)
         val cost = balance.holdings.sumOf { it.qty * it.avgPrice }
@@ -154,6 +156,7 @@ object Rebalance {
             targetSumBp = lines.sumOf { it.targetBp ?: 0 },
             totalPl = pl,
             totalPlRate = if (cost > 0) pl * PERCENT / cost else 0.0,
+            duplicateKeys = balance.holdings.distinctBy { it.key }.size != balance.holdings.size,
         )
     }
 

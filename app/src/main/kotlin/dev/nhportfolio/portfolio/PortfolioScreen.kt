@@ -149,16 +149,16 @@ class PortfolioViewModel(
             store.data.map { readTargets(it, targetsKey) }.catch { },
             store.data.map { readCashCodes(it, cashKey) }.catch { },
             lastFill,
-        ) { (balance, error), targets, cashCodes, fill ->
+        ) { (balance, error), targets, cashKeys, fill ->
             // 현금성 자산을 먼저 접어야 분모·비중·목표·매매 수량이 모두 같은 기준을 쓴다.
-            val folded = balance?.let { Rebalance.foldCash(it, cashCodes) }
+            val folded = balance?.let { Rebalance.foldCash(it, cashKeys) }
             PortfolioUi(
                 balance = folded,
                 plan = folded?.let { Rebalance.plan(it, targets) },
                 lastFill = fill,
                 error = error,
-                cashAssets = balance?.holdings.orEmpty().count { it.code in cashCodes },
-                cashCodes = cashCodes,
+                cashAssets = balance?.holdings.orEmpty().count { it.code in cashKeys },
+                cashCodes = cashKeys,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
@@ -243,8 +243,8 @@ class PortfolioViewModel(
         ui.value.plan
             ?.lines
             .orEmpty()
-            .filter { it.code != Rebalance.CASH }
-            .associate { it.code to it.weightBp }
+            .filter { it.key != Rebalance.CASH }
+            .associate { it.key to it.weightBp }
 
     private fun edit(transform: (Map<String, Int>) -> Map<String, Int>) {
         viewModelScope.launch {
@@ -342,8 +342,8 @@ fun PortfolioScreen(
         ui.plan
             ?.lines
             .orEmpty()
-            .filter { it.code != Rebalance.CASH }
-            .map { it.code }
+            .filter { it.key != Rebalance.CASH }
+            .map { it.key }
     val selection = selectionOf(selected, selectable)
 
     Scaffold(
@@ -752,21 +752,21 @@ private fun HoldingsList(
     onToggle: (code: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val byCode = remember(balance) { balance.holdings.associateBy { it.code } }
+    val byKey = remember(balance) { balance.holdings.associateBy { it.key } }
     // 막대 눈금은 가장 큰 비중/목표 기준. 절대 눈금이면 작은 종목이 실선이 되어 못 읽는다.
     val scaleBp = remember(plan) { plan.lines.maxOf { maxOf(it.weightBp, it.targetBp ?: 0) }.coerceAtLeast(1) }
     LazyColumn(modifier.fillMaxWidth()) {
         items(plan.lines) { line ->
             HoldingRow(
                 line = line,
-                holding = byCode[line.code],
+                holding = byKey[line.key],
                 cashLabel = cashLabel,
                 selecting = selecting,
-                checked = line.code in selected,
+                checked = line.key in selected,
                 scaleBp = scaleBp,
-                onEdit = { onEdit(line.code, line.targetBp) },
-                onLongPress = { onLongPress(line.code) },
-                onToggle = { onToggle(line.code) },
+                onEdit = { onEdit(line.key, line.targetBp) },
+                onLongPress = { onLongPress(line.key) },
+                onToggle = { onToggle(line.key) },
             )
             HorizontalDivider()
         }
@@ -787,7 +787,7 @@ private fun HoldingRow(
 ) {
     // 예수금은 비례 조정 로직(scaleForCash)을 타야 하므로 선택 대상이 아니다 —
     // 롱프레스도 탭 토글도 받지 않는다. 체크박스가 없다는 사실이 그 설명이다.
-    val selectable = line.code != Rebalance.CASH
+    val selectable = line.key != Rebalance.CASH
     val showCheckbox = selecting && selectable
     Row(
         Modifier
