@@ -6,6 +6,8 @@ import dev.nhportfolio.store.clearLegacyKeys
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
+import dev.nhportfolio.store.themeKey
+import dev.nhportfolio.ui.ThemeMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -52,6 +54,18 @@ class PrefsTest {
         prefs[key] = "이건 JSON 이 아니다"
 
         assertEquals(emptySet(), readCashCodes(prefs, key))
+    }
+
+    @Test
+    fun `모르는 테마 저장값은 자동으로 떨어진다`() {
+        val prefs = emptyPreferences().toMutablePreferences()
+        assertEquals(ThemeMode.AUTO, ThemeMode.from(prefs[themeKey]), "저장이 없으면 시스템을 따라야 한다")
+
+        prefs[themeKey] = "SEPIA" // 손으로 고쳤거나 나중 버전이 쓰던 값
+        assertEquals(ThemeMode.AUTO, ThemeMode.from(prefs[themeKey]))
+
+        // 이름으로 저장하므로 상수 이름이 바뀌면 저장된 설정이 조용히 초기화된다.
+        ThemeMode.entries.forEach { assertEquals(it, ThemeMode.from(it.name)) }
     }
 
     @Test
