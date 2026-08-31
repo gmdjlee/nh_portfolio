@@ -31,9 +31,10 @@ class FormatTest {
 
     @Test
     fun `금액과 수량은 천 단위로 끊는다`() {
-        assertEquals("1,234,567", 1_234_567L.krw())
-        assertEquals("0", 0L.krw())
-        assertEquals("-1,000", (-1_000L).krw())
+        assertEquals("1,234,567원", 1_234_567L.krw())
+        assertEquals("0원", 0L.krw())
+        assertEquals("-1,000원", (-1_000L).krw())
+        // 수량에는 단위를 붙이지 않는다 — 부르는 쪽이 "주"·"건" 을 골라 붙인다.
         assertEquals("12,345", 12_345L.shares())
     }
 

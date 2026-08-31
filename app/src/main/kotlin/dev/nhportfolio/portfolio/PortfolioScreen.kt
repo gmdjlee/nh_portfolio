@@ -84,6 +84,7 @@ import dev.nhportfolio.ui.pct
 import dev.nhportfolio.ui.plColor
 import dev.nhportfolio.ui.shares
 import dev.nhportfolio.ui.userMessage
+import dev.nhportfolio.ui.weightBarWidth
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -115,10 +116,6 @@ private data class CashToggle(
 
 private const val FULL_BP = 10_000
 
-// 비중 막대는 줄 하나를 혼자 쓴다 — 64dp 로는 10% 와 12% 의 차이가 눈에 잡히지 않았다.
-// 선택 모드에서는 체크박스가 앞자리를 가져가므로 그만큼 줄인다.
-private val BAR_WIDTH = 150.dp
-private val BAR_WIDTH_SELECTING = 128.dp
 private val TARGET_INPUT = Regex("""^\d{1,3}(\.\d{1,2})?$""")
 
 /** [balance] 와 [error] 가 모두 null 이면 최초 로딩. 오류가 나도 마지막 정상 표는 유지한다. */
@@ -865,34 +862,33 @@ private fun HoldingRow(
                     top = 12.dp,
                     bottom = 13.dp,
                 ),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // 1줄 — 누구인가. 명세는 여기 이름 오른쪽에 붙는다.
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    // weight 는 명세가 아니라 이름 쪽 래퍼에 준다 — 명세(무가중)가 먼저 제 폭을
-                    // 재고, 남는 자리를 이름이 가진다. 반대로 하면 긴 이름이 폭을 다 먹어
-                    // 명세가 0dp 로 밀려 사라진다.
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
-                ) {
-                    Text(
-                        holding?.name ?: cashLabel,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    // 신용/융자 줄에만. 문구는 NH 가 준 상품유형명을 그대로 쓴다 —
-                    // 우리가 지어낸 말보다 실제와 어긋날 위험이 없다.
-                    if (holding?.onCredit == true) CreditChip(holding.productType)
-                }
-                HoldingSpecs(holding)
-            }
-            // 2줄 — 얼마인가.
+            // 1줄 — 누구인가. 이름이 줄을 혼자 쓰므로 접힌 화면(411dp)에서도 잘리지 않고,
+            // 신용 배지가 이름 바로 뒤에 앉을 자리가 남는다.
             Row(
                 Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // weight 는 래퍼가 아니라 이름 Text 에 준다 — 래퍼에만 있으면 이름이 폭 전체를
+                // 먼저 가져가 배지가 0dp 로 밀려 사라진다.
+                Text(
+                    holding?.name ?: cashLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // 문구는 NH 가 준 상품유형명을 그대로 쓴다 — 우리가 지어낸 말보다
+                // 실제와 어긋날 위험이 없다.
+                if (holding?.onCredit == true) CreditChip(holding.productType)
+            }
+            // 2줄 — 무엇을 얼마에 들고 있는가. 예수금 행은 명세가 없어 이 줄을 그리지 않는다.
+            HoldingSpecs(holding)
+            // 3줄 — 얼마인가.
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom,
             ) {
@@ -905,7 +901,7 @@ private fun HoldingRow(
                     )
                 }
             }
-            // 3줄 — 무엇을 할 것인가.
+            // 4줄 — 무엇을 할 것인가.
             Row(
                 Modifier.fillMaxWidth().padding(top = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -915,7 +911,7 @@ private fun HoldingRow(
                     weightBp = line.weightBp,
                     targetBp = line.targetBp,
                     scaleBp = scaleBp,
-                    width = if (showCheckbox) BAR_WIDTH_SELECTING else BAR_WIDTH,
+                    width = weightBarWidth(selecting = showCheckbox),
                 )
                 Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.weight(1f))
@@ -927,13 +923,16 @@ private fun HoldingRow(
 }
 
 /**
- * 잔고수량·평균매입가·현재가. 종목명과 같은 줄의 오른쪽 끝에 붙는다.
+ * 잔고수량·평균매입가·현재가. 이름 아래 제 줄을 쓴다.
  *
- * 라벨은 작고 흐리게, 숫자는 크고 진하게 갈라 둔다 — 한 줄에 여섯 조각이 들어가도
- * 숫자가 먼저 읽힌다. 줄바꿈은 막는다: 여기서 접히면 세 줄 구조가 무너진다.
+ * 이름과 같은 줄에 두면 접힌 화면(411dp)에서 명세가 260dp 를 먼저 가져가 이름에 100dp 밖에
+ * 남지 않는다 — 'SK하이닉스' 가 배지까지 달면 거기서 잘린다. 줄을 하나 더 쓰는 대신
+ * 접힘·펼침 어디서도 세 값을 다 보여주고 이름도 온전하다.
  *
- * **보유수량은 넣지 않는다.** 잔고수량과 값이 같은 경우가 대부분이라 폭만 먹고,
- * 세 항목만으로도 이미 이름이 밀려날 만큼 넓다. 예수금 행은 명세가 없어 비운다.
+ * 라벨은 작고 흐리게, 숫자는 크고 진하게 갈라 둔다 — 숫자가 먼저 읽힌다.
+ *
+ * **보유수량은 넣지 않는다.** 잔고수량과 값이 같은 경우가 대부분이라 폭만 먹는다.
+ * 예수금 행은 명세가 없어 이 줄 자체를 그리지 않는다.
  */
 @Composable
 private fun HoldingSpecs(holding: Holding?) {

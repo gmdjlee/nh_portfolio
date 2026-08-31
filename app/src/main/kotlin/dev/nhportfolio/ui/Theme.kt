@@ -9,8 +9,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 
 // 데이터 우선 팔레트 — 흰 바탕에 가까운 무채색 위에서 숫자가 주인공이 된다.
@@ -77,6 +81,22 @@ internal val BarTrack = Color(0xFFEDEFF2)
 internal val BarFill = Color(0xFFA9B2BF)
 internal val BarTrackDark = Color(0xFF232A34)
 internal val BarFillDark = Color(0xFF5A6472)
+
+/**
+ * 카드 묶음 화면(계좌 목록·설정)의 바탕색·카드색·테두리색.
+ *
+ * 카드는 바탕보다 **밝아야** 떠 보인다. 다크에서 surface(#0E1116)를 카드로 쓰면 바탕이 될
+ * surfaceVariant(#1C222B)보다 어두워져 카드가 오히려 파여 보인다 — 그래서 이 화면 전용으로
+ * 바탕을 기본 배경보다 더 내리고 카드를 그 위로 올린 값을 따로 둔다.
+ *
+ * 대비는 계산값이다: 다크에서 흐린 글자(#8B93A1)가 카드 위에서 5.53:1 (AA 통과).
+ */
+internal val GroupedPage = Color(0xFFF4F6F8)
+internal val GroupedCard = Color(0xFFFFFFFF)
+internal val GroupedLine = Color(0xFFEDEFF2)
+internal val GroupedPageDark = Color(0xFF080B0F)
+internal val GroupedCardDark = Color(0xFF171C24)
+internal val GroupedLineDark = Color(0xFF262E39)
 
 /**
  * 종목 행 명세(잔고·평균·현재)의 라벨색과 숫자색.
@@ -190,18 +210,76 @@ private val NhTypography =
         )
     }
 
+/**
+ * 이 폭부터 펼친 화면으로 본다. 실측(SM-F976N, 밀도 420): 접힘 411dp, 펼침 859dp —
+ * 둘 사이 어디를 잡아도 되지만 600dp 는 Material 이 쓰는 값이라 다른 기기에서도 말이 된다.
+ */
+private const val EXPANDED_WIDTH_DP = 600
+
+/** 펼친 화면의 타이포 배율. 폭은 2.09배지만 글자를 그만큼 키우면 우스워진다 — 한 단계 큰 글씨. */
+private const val EXPANDED_TYPE_SCALE = 1.2f
+
+private fun TextStyle.scaled(factor: Float): TextStyle =
+    copy(
+        fontSize = fontSize * factor,
+        lineHeight = if (lineHeight.isSpecified) lineHeight * factor else lineHeight,
+        letterSpacing = if (letterSpacing.isSpecified) letterSpacing * factor else letterSpacing,
+    )
+
+/**
+ * 앱이 실제로 쓰는 슬롯만 키운다. 화면 코드는 스타일 이름으로만 글자를 고르므로,
+ * 여기서 한 번 곱해 두면 모든 화면이 따라온다.
+ */
+private fun Typography.scaled(factor: Float): Typography =
+    if (factor == 1f) {
+        this
+    } else {
+        copy(
+            displaySmall = displaySmall.scaled(factor),
+            titleLarge = titleLarge.scaled(factor),
+            titleMedium = titleMedium.scaled(factor),
+            titleSmall = titleSmall.scaled(factor),
+            bodyLarge = bodyLarge.scaled(factor),
+            bodyMedium = bodyMedium.scaled(factor),
+            bodySmall = bodySmall.scaled(factor),
+            labelLarge = labelLarge.scaled(factor),
+            labelMedium = labelMedium.scaled(factor),
+            labelSmall = labelSmall.scaled(factor),
+        )
+    }
+
+/**
+ * 폴더블을 펼치면 글자가 커진다. 여백과 터치 대상은 그대로 둔다 — 폭이 넓어졌다고
+ * 44dp 대상이 커져야 할 이유가 없고, 커지면 오히려 성기게 보인다.
+ *
+ * 접었다 펴면 액티비티가 통째로 다시 만들어지므로(configChanges 를 걸지 않았다) 전환은
+ * 저절로 처리된다. 폰트 배율(설정의 글자 크기)은 sp 가 이미 반영하므로 여기서 곱하지 않는다.
+ */
 @Composable
 fun NhTheme(
     dark: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val expanded = LocalConfiguration.current.screenWidthDp >= EXPANDED_WIDTH_DP
     MaterialTheme(
         colorScheme = if (dark) DarkScheme else LightScheme,
         shapes = DataShapes,
-        typography = NhTypography,
+        typography = NhTypography.scaled(if (expanded) EXPANDED_TYPE_SCALE else 1f),
         content = content,
     )
 }
+
+/** 비중 막대 폭. 막대는 글자와 함께 읽는 눈금이라 글자가 커지면 같이 길어져야 한다. */
+@Composable
+fun weightBarWidth(selecting: Boolean): Dp =
+    when {
+        LocalConfiguration.current.screenWidthDp >= EXPANDED_WIDTH_DP -> 220.dp
+
+        // 선택 모드에서는 체크박스가 앞자리를 가져가므로 그만큼 줄인다.
+        selecting -> 128.dp
+
+        else -> 150.dp
+    }
 
 /**
  * 화면 테마 선택. 저장은 [name] 문자열로 하므로 **상수 이름을 바꾸면 저장된 설정이 초기화된다**

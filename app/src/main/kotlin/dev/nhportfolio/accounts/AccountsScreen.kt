@@ -1,6 +1,7 @@
 package dev.nhportfolio.accounts
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +57,7 @@ import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.ui.PencilIcon
 import dev.nhportfolio.ui.SettingsIcon
 import dev.nhportfolio.ui.compositionColors
+import dev.nhportfolio.ui.groupedColors
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
 import dev.nhportfolio.ui.plColor
@@ -222,11 +224,14 @@ fun AccountsScreen(
 
                 else -> {
                     Column(Modifier.fillMaxSize()) {
+                        // 합계는 화면 바탕(흰색) 위에 그대로 둔다 — 카드로 감싸면 계좌 카드들과
+                        // 같은 무게가 되어 '전체' 라는 사실이 묻힌다.
                         TotalCard(rows)
                         // 계좌 하나를 카드로 세운다 — 목록이 아니라 '들어갈 곳' 이라는 사실이
                         // 형태로 드러나고, 구분선만 그을 때보다 계좌끼리 훨씬 잘 갈린다.
+                        // 카드가 뜨려면 바탕이 카드보다 어두워야 한다(groupedColors 참고).
                         LazyColumn(
-                            Modifier.fillMaxSize(),
+                            Modifier.fillMaxSize().background(groupedColors().page),
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
@@ -286,7 +291,7 @@ private fun TotalCard(rows: List<AccountRow>) {
             )
         }
     }
-    HorizontalDivider(thickness = 8.dp, color = MaterialTheme.colorScheme.surfaceVariant)
+    // 두꺼운 구분선은 없앴다 — 아래 카드 목록의 회색 바탕이 이미 합계와 목록을 갈라 놓는다.
 }
 
 @Composable
@@ -296,16 +301,21 @@ private fun AccountCard(
     onRename: () -> Unit,
 ) {
     val plan = row.plan
+    val g = groupedColors()
     Column(
         Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(g.card)
+            .border(1.dp, g.line, MaterialTheme.shapes.large)
             .clickable(onClick = onOpen)
             .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // 이름이 없으면 계좌구분을 흐린 글자로 — 지어낸 이름이 아니라는 걸 색으로 알린다.
+            // weight 는 fill = true 여야 하고, Spacer 를 함께 두면 안 된다. 가중치가 둘이면
+            // Row 가 남는 폭을 절반씩 나눠 주는데, fill = false 인 이름은 제 글자만큼만 쓰고
+            // 나머지를 반납한다 — 그 반납분은 줄 끝에 빈칸으로 남고 연필은 3분의 2 지점에 선다.
             Text(
                 row.name ?: "운영 계좌",
                 style = MaterialTheme.typography.titleMedium,
@@ -317,9 +327,8 @@ private fun AccountCard(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
             )
-            Spacer(Modifier.weight(1f))
             // 이름 수정은 카드 열기와 다른 44dp 대상이라 서로 잡아먹지 않는다.
             // 대상은 왼쪽으로 넓히고 연필 자체는 오른쪽 끝선에 붙인다 — IconButton 은 아이콘을
             // 한가운데 두어서, 같은 자리에 오른쪽 정렬된 금액·손익보다 15dp 안쪽으로 들어가 보인다.
