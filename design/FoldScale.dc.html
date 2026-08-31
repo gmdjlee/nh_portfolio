@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .fs { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .fs .num { font-weight: 700; letter-spacing: -.025em; }
+    .fs th { font-size: 11px; font-weight: 700; color: #8A9099; letter-spacing: .05em; text-align: left; padding: 0 14px 8px 0; }
+    .fs td { font-size: 13px; padding: 8px 14px 8px 0; border-top: 1px solid #EDEFF2; vertical-align: middle; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="fs" style="width: 780px; height: 560px; background: #FFFFFF; color: #111214; padding: 22px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px;">
+
+  <div>
+    <div style="font-size: 17px; font-weight: 700;">폴딩에 따른 타이포 스케일</div>
+    <div style="font-size: 12px; color: #6E7481; margin-top: 3px;">
+      SM-F976N 실측 — 접힘 411dp · 펼침 859dp (밀도 420, 글꼴 배율 1.0). 경계는 600dp. 줄 구조는 둘이 같고 크기만 다르다.
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-size: 12px; font-weight: 700; color: #3F6B4A;">접힘 — 411dp · 배율 1.0</div>
+      <div style="border: 1px solid #EDEFF2; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 7px;">
+        <span class="num" style="font-size: 34px; line-height: 1.05; letter-spacing: -.035em;">100,000,000원</span>
+        <span style="font-size: 16px; font-weight: 700;">SK하이닉스</span>
+        <span class="num" style="font-size: 19px;">11,670,000원</span>
+        <span><span style="font-size: 12px; color: #8A9099;">현재</span> <span class="num" style="font-size: 14px; font-weight: 600; color: #3E4550;">194,500원</span></span>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-size: 12px; font-weight: 700; color: #3F6B4A;">펼침 — 859dp · 배율 1.2</div>
+      <div style="border: 1px solid #EDEFF2; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 7px;">
+        <span class="num" style="font-size: 41px; line-height: 1.05; letter-spacing: -.035em;">100,000,000원</span>
+        <span style="font-size: 19px; font-weight: 700;">SK하이닉스</span>
+        <span class="num" style="font-size: 23px;">11,670,000원</span>
+        <span><span style="font-size: 14px; color: #8A9099;">현재</span> <span class="num" style="font-size: 17px; font-weight: 600; color: #3E4550;">194,500원</span></span>
+      </div>
+    </div>
+  </div>
+
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr><th style="width: 40%;">역할</th><th>접힘</th><th>펼침</th><th style="width: 30%;">비고</th></tr>
+    </thead>
+    <tbody>
+      <sc-for list="{{scale}}" as="s" hint-placeholder-count="6">
+        <tr>
+          <td>{{s.role}}</td>
+          <td class="num" style="font-size: 13px;">{{s.compact}}</td>
+          <td class="num" style="font-size: 13px; color: #3F6B4A;">{{s.expanded}}</td>
+          <td style="font-size: 12px; color: #8A9099;">{{s.note}}</td>
+        </tr>
+      </sc-for>
+    </tbody>
+  </table>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    // 배율 1.2 는 타이포에만 건다. 여백·터치 대상은 그대로 둔다 —
+    // 폭이 넓어졌다고 44dp 대상이 커져야 할 이유는 없다.
+    return {
+      scale: [
+        { role: '총 평가금액 (displaySmall)', compact: '34sp', expanded: '41sp', note: '두 화면 모두 가장 큰 글자' },
+        { role: '종목 평가금액 (titleLarge)', compact: '19sp', expanded: '23sp', note: '' },
+        { role: '종목명 (titleMedium)', compact: '16sp', expanded: '19sp', note: '' },
+        { role: '명세 숫자 (bodyMedium)', compact: '14sp', expanded: '17sp', note: '' },
+        { role: '명세 라벨 (labelMedium)', compact: '12sp', expanded: '14sp', note: '' },
+        { role: '비중 · 경고 (bodySmall)', compact: '12sp', expanded: '14sp', note: '' },
+        { role: '비중 막대 폭', compact: '150dp', expanded: '220dp', note: '타이포는 아니지만 같이 커져야 한다' },
+        { role: '명세 항목 수', compact: '3개', expanded: '3개', note: '명세가 제 줄을 써서 둘 다 셋' },
+        { role: '종목 한 줄의 줄 수', compact: '4줄', expanded: '4줄', note: '이름 / 명세 / 금액 / 막대' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 package dev.nhportfolio.settings
 
 import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +60,7 @@ import dev.nhportfolio.security.Vault
 import dev.nhportfolio.store.themeKey
 import dev.nhportfolio.ui.ChevronIcon
 import dev.nhportfolio.ui.ThemeMode
+import dev.nhportfolio.ui.groupedColors
 import dev.nhportfolio.ui.userMessage
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -196,6 +198,8 @@ fun SettingsScreen(
                 Modifier
                     .fillMaxSize()
                     .padding(padding)
+                    // 바탕은 카드보다 어둡다 — 그래야 묶음이 떠 보인다(groupedColors 참고).
+                    .background(groupedColors().page)
                     .padding(horizontal = 16.dp)
                     .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -337,16 +341,18 @@ private fun SectionLabel(
     )
 }
 
-/** 설정 한 묶음. 배경 한 겹으로 어디까지가 한 덩어리인지 알린다. */
+/** 설정 한 묶음. 바탕보다 밝은 카드 한 장으로 어디까지가 한 덩어리인지 알린다. */
 @Composable
 private fun SettingsGroup(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val g = groupedColors()
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = g.card,
+        border = BorderStroke(1.dp, g.line),
         content = content,
     )
 }

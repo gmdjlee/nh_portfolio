@@ -16,7 +16,13 @@ import java.util.Locale
 // (한 화면에 수십 개라 비용은 무시할 수준이다).
 private fun formatter(pattern: String) = DecimalFormat(pattern, DecimalFormatSymbols(Locale.KOREA))
 
-fun Long.krw(): String = formatter("#,##0").format(this)
+/**
+ * 금액. 단위를 문자열에 붙여 둔다 — 숫자만 있으면 수량인지 금액인지 화면에서 갈리지 않는다.
+ *
+ * NH 나무는 국내 계좌만 다루고 잔고 응답에도 통화 필드가 없어 여기 오는 값은 전부 원화다.
+ * 외화 계좌가 생기면 통화 코드를 먼저 받아 와야 하며, 그때는 이 함수가 통화를 인자로 받아야 한다.
+ */
+fun Long.krw(): String = formatter("#,##0").format(this) + "원"
 
 fun Long.shares(): String = formatter("#,##0").format(this)
 
@@ -119,6 +125,21 @@ fun Throwable.userMessage(): String =
         else -> {
             "오류가 발생했습니다"
         }
+    }
+
+/** 카드 묶음 화면(계좌 목록·설정)의 바탕·카드·테두리 색. */
+data class GroupedColors(
+    val page: Color,
+    val card: Color,
+    val line: Color,
+)
+
+@Composable
+fun groupedColors(): GroupedColors =
+    if (onDark()) {
+        GroupedColors(GroupedPageDark, GroupedCardDark, GroupedLineDark)
+    } else {
+        GroupedColors(GroupedPage, GroupedCard, GroupedLine)
     }
 
 /** 종목 행 명세(잔고·평균·현재)의 라벨색과 숫자색. */
