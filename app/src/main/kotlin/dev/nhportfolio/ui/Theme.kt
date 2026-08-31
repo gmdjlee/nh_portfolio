@@ -175,3 +175,30 @@ fun NhTheme(
         content = content,
     )
 }
+
+/**
+ * 화면 테마 선택. 저장은 [name] 문자열로 하므로 **상수 이름을 바꾸면 저장된 설정이 초기화된다**
+ * — 모르는 이름은 [from] 이 [AUTO] 로 흡수한다.
+ */
+enum class ThemeMode(
+    val label: String,
+) {
+    AUTO("자동"),
+    LIGHT("밝게"),
+    DARK("어둡게"),
+    ;
+
+    companion object {
+        /** 저장값이 없거나 모르는 값이어도 화면이 죽지 않는다 — 지정이 없는 것으로 본다. */
+        fun from(name: String?): ThemeMode = entries.firstOrNull { it.name == name } ?: AUTO
+    }
+}
+
+/** [ThemeMode.AUTO] 일 때만 시스템 설정을 따른다. */
+@Composable
+fun ThemeMode.isDark(): Boolean =
+    when (this) {
+        ThemeMode.AUTO -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }

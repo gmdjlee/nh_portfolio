@@ -16,14 +16,9 @@
 </helmet>
 <div class="s" style="width: 390px; height: 844px; background: #FFFFFF; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
 
-  <div style="padding: 14px 16px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #EDEFF2;">
-    <div style="display: flex; align-items: center; gap: 10px;">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111214" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
-      <span style="font-size: 15px; font-weight: 700;">3개 선택</span>
-    </div>
-    <div style="width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3F6B4A; display: flex; align-items: center; justify-content: center;">
-      <div style="width: 9px; height: 2px; background: #3F6B4A; border-radius: 1px;"></div>
-    </div>
+  <div style="padding: 14px 16px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #EDEFF2;">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111214" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+    <span style="font-size: 15px; font-weight: 700;">3개 선택</span>
   </div>
 
   <div style="padding: 15px 16px 13px; display: flex; flex-direction: column; gap: 11px; border-bottom: 8px solid #F4F6F8;">
@@ -79,9 +74,17 @@
     </sc-for>
   </div>
 
-  <div style="border-top: 1px solid #EDEFF2; background: #F7F8FA; padding: 8px 12px; display: flex; justify-content: flex-end; gap: 4px;">
-    <span style="font-size: 14px; font-weight: 500; color: #3F6B4A; padding: 8px 12px;">목표 지우기</span>
-    <span style="font-size: 14px; font-weight: 500; color: #3F6B4A; padding: 8px 12px;">목표 설정</span>
+  <div style="border-top: 1px solid #EDEFF2; background: #F7F8FA; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;">
+    <div style="display: flex; align-items: center; gap: 8px; padding-left: 4px;">
+      <div style="width: 18px; height: 18px; border-radius: 4px; border: 2px solid #3F6B4A; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 9px; height: 2px; background: #3F6B4A; border-radius: 1px;"></div>
+      </div>
+      <span style="font-size: 14px; font-weight: 500;">전체 선택</span>
+    </div>
+    <div style="display: flex; gap: 4px;">
+      <span style="font-size: 14px; font-weight: 500; color: #3F6B4A; padding: 8px 12px;">목표 지우기</span>
+      <span style="font-size: 14px; font-weight: 500; color: #3F6B4A; padding: 8px 12px;">목표 설정</span>
+    </div>
   </div>
 </div>
 </x-dc>

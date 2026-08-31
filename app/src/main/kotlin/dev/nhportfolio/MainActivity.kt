@@ -1,8 +1,11 @@
 package dev.nhportfolio
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -18,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -32,8 +37,12 @@ import dev.nhportfolio.portfolio.PortfolioScreen
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
 import dev.nhportfolio.settings.SettingsScreen
+import dev.nhportfolio.store.themeKey
 import dev.nhportfolio.ui.NhTheme
+import dev.nhportfolio.ui.ThemeMode
+import dev.nhportfolio.ui.isDark
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.koin.androidx.compose.koinViewModel
@@ -50,8 +59,36 @@ class MainActivity : FragmentActivity() {
         window.decorView.filterTouchesWhenObscured = true
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
 
-        setContent { NhTheme { AppNav() } }
+        setContent { NhApp(this) }
     }
+}
+
+/**
+ * 저장된 테마를 앱 전체에 입힌다. 게이트([AppNav])보다 바깥이라 잠금 화면에도 같은 테마가 걸린다.
+ */
+@Composable
+private fun NhApp(activity: ComponentActivity) {
+    val store: DataStore<Preferences> = koinInject()
+    // 저장값을 읽기 전에는 AUTO 로 그린다 — 저장이 없을 때의 값과 같아서 깜빡임이 없다.
+    val mode by remember { store.data.map { ThemeMode.from(it[themeKey]) }.catch { emit(ThemeMode.AUTO) } }
+        .collectAsStateWithLifecycle(ThemeMode.AUTO)
+    val dark = mode.isDark()
+
+    // 상태·내비게이션 바 아이콘 색은 시스템이 아니라 사용자가 고른 테마를 따라야 한다.
+    // onCreate 의 enableEdgeToEdge() 기본값은 SystemBarStyle.auto 라 시스템 설정을 보므로,
+    // 밝은 시스템에서 다크를 고르면 어두운 아이콘이 어두운 배경에 얹혀 보이지 않는다.
+    // 스크림을 투명으로 두는 건 minSdk 31 이라 시스템이 알아서 대비를 넣어주기 때문이다.
+    LaunchedEffect(dark) {
+        val bars =
+            if (dark) {
+                SystemBarStyle.dark(Color.TRANSPARENT)
+            } else {
+                SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+            }
+        activity.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+    }
+
+    NhTheme(dark) { AppNav() }
 }
 
 /** 타입 세이프 내비게이션 경로. 잠금 화면과 "키 없음" 화면은 Route 가 아니라 게이트 단계다. */

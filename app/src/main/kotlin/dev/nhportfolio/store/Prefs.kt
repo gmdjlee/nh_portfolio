@@ -58,3 +58,6 @@ fun clearLegacyKeys(
     prefs.remove(accountKey("targets_", acctNo))
     prefs.remove(accountKey("cash_", acctNo))
 }
+
+/** 화면 테마. 계좌와 무관한 앱 전체 설정이라 계좌번호 해시를 붙이지 않는다. */
+val themeKey: Preferences.Key<String> = stringPreferencesKey("theme")

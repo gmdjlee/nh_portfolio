@@ -17,6 +17,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,6 +35,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,10 +45,13 @@ import androidx.lifecycle.viewModelScope
 import dev.nhportfolio.lock.PinMode
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
+import dev.nhportfolio.store.themeKey
+import dev.nhportfolio.ui.ThemeMode
 import dev.nhportfolio.ui.userMessage
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
@@ -53,11 +62,18 @@ private val PRINTABLE = 33..126
 class SettingsViewModel(
     private val vault: Vault,
     private val biometric: Biometric,
+    private val store: DataStore<Preferences>,
 ) : ViewModel() {
     val hasKeys: StateFlow<Boolean?> =
         vault.hasKeys
             .catch { emit(false) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val themeMode: StateFlow<ThemeMode> =
+        store.data
+            .map { ThemeMode.from(it[themeKey]) }
+            .catch { emit(ThemeMode.AUTO) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeMode.AUTO)
 
     val bioEnrolled: StateFlow<Boolean?> =
         biometric.enrolled
@@ -108,6 +124,15 @@ class SettingsViewModel(
         }
     }
 
+    /** 저장에 실패하면 [themeMode] 가 그대로라 버튼도 움직이지 않는다 — 오류를 같이 띄운다. */
+    fun setTheme(mode: ThemeMode) {
+        viewModelScope.launch {
+            runCatching { store.edit { it[themeKey] = mode.name } }
+                .onSuccess { error = null }
+                .onFailure { error = "화면 테마를 저장하지 못했습니다" }
+        }
+    }
+
     fun enrollBiometric(activity: FragmentActivity) {
         viewModelScope.launch {
             error = if (biometric.enroll(activity)) null else "지문을 등록하지 못했습니다"
@@ -134,6 +159,7 @@ fun SettingsScreen(
     val activity = LocalActivity.current as? FragmentActivity
     val hasKeys by vm.hasKeys.collectAsStateWithLifecycle()
     val bioEnrolled by vm.bioEnrolled.collectAsStateWithLifecycle()
+    val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val biometricAvailable = remember { Biometric.available(context) }
 
     var appKey by remember { mutableStateOf("") }
@@ -205,6 +231,19 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("저장") }
+
+            HorizontalDivider()
+
+            Text("화면 테마", style = MaterialTheme.typography.titleMedium)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = themeMode == mode,
+                        onClick = { vm.setTheme(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                    ) { Text(mode.label) }
+                }
+            }
 
             HorizontalDivider()
 

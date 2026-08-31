@@ -363,10 +363,9 @@ fun PortfolioScreen(
                 // 리로드 실패로 plan 이 없으면 고를 대상 자체가 없다 — 선택 상단바 대신
                 // 새로고침 가능한 기본 바를 보여준다. selecting(모드 자체)은 그대로 유지된다.
                 selecting = selecting && ui.plan != null,
-                selection = selection,
+                selectedCount = selection.codes.size,
                 onBack = onBack,
                 onRefresh = vm::refresh,
-                onToggleAll = { selected = toggleAll(selection, selectable) },
                 onExit = exitSelection,
             )
         },
@@ -419,7 +418,8 @@ fun PortfolioScreen(
                         )
                         if (selecting) {
                             BatchBar(
-                                enabled = selection.codes.isNotEmpty(),
+                                selection = selection,
+                                onToggleAll = { selected = toggleAll(selection, selectable) },
                                 onClearTargets = { confirmClear = true },
                                 onSet = { editing = selection.codes.toList() to null },
                             )
@@ -470,21 +470,13 @@ fun PortfolioScreen(
 private fun PortfolioTopBar(
     acctNo: String,
     selecting: Boolean,
-    selection: Selection,
+    selectedCount: Int,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
-    onToggleAll: () -> Unit,
     onExit: () -> Unit,
 ) {
     if (selecting) {
-        SelectionTopBar(
-            count = selection.codes.size,
-            allSelected = selection.allSelected,
-            anySelected = selection.codes.isNotEmpty(),
-            hasSelectable = selection.hasSelectable,
-            onToggleAll = onToggleAll,
-            onExit = onExit,
-        )
+        SelectionTopBar(count = selectedCount, onExit = onExit)
     } else {
         TopAppBar(
             title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
@@ -552,15 +544,11 @@ private fun TargetEditor(
  * 선택 모드 상단바. 계좌번호 대신 선택 개수를 걸고, 뒤로가기 자리를 나가기가 아니라 선택 취소로 바꾼다.
  *
  * 뒤로 화살표를 그대로 두면 "어디로 돌아가는지" 가 모호해진다 — 선택을 끝내는 X 로 갈라 쓴다.
- * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다.
+ * 전체 선택은 [BatchBar] 로 내렸다 — 선택을 바꾸는 조작이 한 줄에 모여야 엄지가 오가지 않는다.
  */
 @Composable
 private fun SelectionTopBar(
     count: Int,
-    allSelected: Boolean,
-    anySelected: Boolean,
-    hasSelectable: Boolean,
-    onToggleAll: () -> Unit,
     onExit: () -> Unit,
 ) {
     TopAppBar(
@@ -570,50 +558,55 @@ private fun SelectionTopBar(
                 CloseIcon(modifier = Modifier.semantics { contentDescription = "선택 취소" })
             }
         },
-        actions = {
-            // 다섯 메뉴 중 유일하게 화면에 글자가 없던 항목 — 부분 선택일 땐 대시만 그려져
-            // 무엇을 하는 체크박스인지 알 수 없었다. contentDescription 은 그대로 두고 글자를 더한다.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("전체 선택", style = MaterialTheme.typography.labelLarge)
-                TriStateCheckbox(
-                    state =
-                        when {
-                            allSelected -> ToggleableState.On
-                            anySelected -> ToggleableState.Indeterminate
-                            else -> ToggleableState.Off
-                        },
-                    onClick = onToggleAll,
-                    enabled = hasSelectable,
-                    modifier = Modifier.semantics { contentDescription = "전체 선택" },
-                )
-            }
-        },
     )
 }
 
 /**
  * 선택 모드 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다.
  *
+ * 왼쪽은 무엇을 고를지(전체 선택), 오른쪽은 고른 것으로 무엇을 할지 — 방향으로 역할을 가른다.
+ * 일부만 골랐을 때 체크박스는 [ToggleableState.Indeterminate] 고, 누르면 전체 선택으로 간다.
+ *
  * 아무것도 안 골랐을 때 버튼을 숨기지 않고 흐리게 남긴다 — 사라지면 무엇이 가능한지 알 수 없다.
  * 개수와 선택 취소는 상단바가 맡는다(한 화면에 같은 숫자를 두 번 쓰지 않는다).
  */
 @Composable
 private fun BatchBar(
-    enabled: Boolean,
+    selection: Selection,
+    onToggleAll: () -> Unit,
     onClearTargets: () -> Unit,
     onSet: () -> Unit,
 ) {
+    val enabled = selection.codes.isNotEmpty()
     Surface(tonalElevation = 3.dp) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(enabled = enabled, onClick = onClearTargets) { Text("목표 지우기") }
-            TextButton(enabled = enabled, onClick = onSet) { Text("목표 설정") }
+            // 체크박스만 두면 부분 선택일 때 대시만 그려져 무엇을 하는 것인지 알 수 없다 —
+            // contentDescription 과 별개로 화면에도 글자를 남긴다.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TriStateCheckbox(
+                    state =
+                        when {
+                            selection.allSelected -> ToggleableState.On
+                            enabled -> ToggleableState.Indeterminate
+                            else -> ToggleableState.Off
+                        },
+                    onClick = onToggleAll,
+                    enabled = selection.hasSelectable,
+                    modifier = Modifier.semantics { contentDescription = "전체 선택" },
+                )
+                Text("전체 선택", style = MaterialTheme.typography.labelLarge)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(enabled = enabled, onClick = onClearTargets) { Text("목표 지우기") }
+                TextButton(enabled = enabled, onClick = onSet) { Text("목표 설정") }
+            }
         }
     }
 }
