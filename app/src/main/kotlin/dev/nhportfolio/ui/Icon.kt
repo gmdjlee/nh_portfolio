@@ -23,20 +23,24 @@ private val DEFAULT_SIZE = 20.dp
 
 private fun strokeStyle(scale: Float) = Stroke(width = STROKE * scale, cap = StrokeCap.Round, join = StrokeJoin.Round)
 
-/** 뒤로 — 왼쪽 꺾쇠. */
+/**
+ * 더 들어갈 곳이 있음 — 오른쪽 꺾쇠. 설정 목록 행 끝에 붙는다.
+ *
+ * 뒤로 가기는 아이콘이 아니라 "뒤로" 글자로 통일했으므로 왼쪽 꺾쇠는 없다.
+ */
 @Composable
-fun BackIcon(
+fun ChevronIcon(
     modifier: Modifier = Modifier,
-    size: Dp = DEFAULT_SIZE,
-    tint: Color = MaterialTheme.colorScheme.onSurface,
+    size: Dp = 18.dp,
+    tint: Color = MaterialTheme.colorScheme.outlineVariant,
 ) {
     Canvas(modifier.size(size)) {
         val s = this.size.minDimension / GRID
         val path =
             Path().apply {
-                moveTo(15f * s, 18f * s)
-                lineTo(9f * s, 12f * s)
-                lineTo(15f * s, 6f * s)
+                moveTo(9f * s, 6f * s)
+                lineTo(15f * s, 12f * s)
+                lineTo(9f * s, 18f * s)
             }
         drawPath(path, tint, style = strokeStyle(s))
     }

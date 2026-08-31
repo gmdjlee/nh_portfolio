@@ -121,6 +121,15 @@ fun Throwable.userMessage(): String =
         }
     }
 
+/** 종목 행 명세(잔고·평균·현재)의 라벨색과 숫자색. */
+data class DetailColors(
+    val label: Color,
+    val value: Color,
+)
+
+@Composable
+fun detailColors(): DetailColors = if (onDark()) DetailColors(DetailLabelDark, DetailValueDark) else DetailColors(DetailLabel, DetailValue)
+
 /** 계좌 구성 파이의 조각 색과, 그에 맞는 라벨 글자색. */
 data class CompositionColors(
     val stock: Color,
