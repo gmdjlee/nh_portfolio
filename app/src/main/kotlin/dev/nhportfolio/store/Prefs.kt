@@ -1,5 +1,6 @@
 package dev.nhportfolio.store
 
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.serialization.json.Json
@@ -20,9 +21,9 @@ private fun accountKey(
     return stringPreferencesKey(prefix + digest.joinToString("") { "%02x".format(it) }.take(16))
 }
 
-fun targetsKey(acctNo: String): Preferences.Key<String> = accountKey("targets_", acctNo)
+fun targetsKey(acctNo: String): Preferences.Key<String> = accountKey("targets2_", acctNo)
 
-fun cashKey(acctNo: String): Preferences.Key<String> = accountKey("cash_", acctNo)
+fun cashKey(acctNo: String): Preferences.Key<String> = accountKey("cash2_", acctNo)
 
 /** 사용자가 붙인 계좌 이름. NH API 는 계좌명을 주지 않는다. */
 fun nameKey(acctNo: String): Preferences.Key<String> = accountKey("name_", acctNo)
@@ -43,3 +44,17 @@ fun readCashCodes(
     prefs: Preferences,
     key: Preferences.Key<String>,
 ): Set<String> = runCatching { Json.decodeFromString<Set<String>>(prefs[key] ?: "[]") }.getOrDefault(emptySet())
+
+/**
+ * 종목코드로 저장하던 옛 목표·현금성 지정을 지운다.
+ *
+ * 신원이 `종목코드`에서 `종목코드|상품유형명`으로 바뀌어서 옛 값은 어느 줄 것인지 알 수 없다.
+ * 접두사만 올리고 두면 DataStore 에 영원히 남으므로 실제로 지운다.
+ */
+fun clearLegacyKeys(
+    prefs: MutablePreferences,
+    acctNo: String,
+) {
+    prefs.remove(accountKey("targets_", acctNo))
+    prefs.remove(accountKey("cash_", acctNo))
+}

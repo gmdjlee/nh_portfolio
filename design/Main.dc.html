@@ -29,7 +29,7 @@
     <div style="display: flex; flex-direction: column; gap: 1px;">
       <div style="display: flex; align-items: baseline; justify-content: space-between;">
         <span style="font-size: 12px; font-weight: 500; color: #6E7481;">총 평가금액</span>
-        <span style="font-size: 12px; color: #6E7481;">5종목</span>
+        <span style="font-size: 12px; color: #6E7481;">6종목</span>
       </div>
       <span class="num" style="font-size: 33px; line-height: 1.08;">100,000,000</span>
       <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500 (+4.36%)</span>
@@ -47,9 +47,14 @@
   </div>
 
   <div style="flex: 1; overflow: hidden;">
-    <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
       <div style="padding: 10px 16px 11px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: baseline;">
-        <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
+        <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+          <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
+          <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 10px; font-weight: 700; color: #6A5B4B; background: #F2EEE9; padding: 2px 6px; border-radius: 5px; white-space: nowrap;">{{r.creditLabel}}</span>
+          </sc-if>
+        </span>
         <span class="num" style="font-size: 17px; text-align: right;">{{r.amt}}</span>
         <span style="font-size: 12px; color: #6E7481;">{{r.sub}}</span>
         <span class="num" style="font-size: 13px; color: {{r.plc}}; text-align: right;">{{r.pl}}</span>
@@ -79,17 +84,21 @@ class Component extends DCLogic {
     return {
       rows: [
         { name: '현대차', amt: '35,617,500', sub: '150주 · 237,450', pl: '+7.44%', plc: R, bg: '#FFFFFF',
-          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', ...buy },
-        { name: '삼성전자', amt: '18,550,000', sub: '250주 · 74,200', pl: '+8.48%', plc: R, bg: '#FFFFFF',
-          wNow: '46%', wTgt: '50%', wLabel: '18.55% → 20.00%', delta: '19주 매수', ...buy },
+          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy },
+        // 삼성전자는 현금분·신용분 두 줄로 온다 — 같은 종목코드, 다른 상품유형명.
+        // 평가금액·평균가·목표가 각자 독립이라 한쪽을 조정해도 다른 쪽은 그대로다.
+        { name: '삼성전자', amt: '11,130,000', sub: '150주 · 74,200', pl: '+23.67%', plc: R, bg: '#FFFFFF',
+          wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy },
+        { name: '삼성전자', amt: '7,420,000', sub: '100주 · 74,200', pl: '-8.40%', plc: B, bg: '#FFFFFF',
+          wNow: '19%', wTgt: '20%', wLabel: '7.42% → 8.00%', delta: '8주 매수', credit: true, creditLabel: '신용융자', ...buy },
         { name: '카카오', amt: '13,245,000', sub: '300주 · 44,150', pl: '-15.58%', plc: B, bg: '#FFFFFF',
-          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', ...sell },
+          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell },
         { name: 'SK하이닉스', amt: '11,670,000', sub: '60주 · 194,500', pl: '+9.27%', plc: R, bg: '#FFFFFF',
-          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', ...sell },
+          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', credit: false, creditLabel: '', ...sell },
         { name: 'NAVER', amt: '10,917,500', sub: '55주 · 198,500', pl: '-7.67%', plc: B, bg: '#FFFFFF',
-          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', ...sell },
+          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', credit: false, creditLabel: '', ...sell },
         { name: '현금', amt: '10,000,000', sub: '예수금 D+2', pl: '', plc: '#6E7481', bg: '#FAFBFC',
-          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', ...flat },
+          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', credit: false, creditLabel: '', ...flat },
       ],
     };
   }

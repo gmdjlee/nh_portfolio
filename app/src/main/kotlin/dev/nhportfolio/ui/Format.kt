@@ -69,6 +69,10 @@ fun deltaChipColors(delta: Long?): ChipColors {
     }
 }
 
+/** 신용/융자 배지 색. 분류 표시이므로 손익·조작 색을 쓰지 않는다. */
+@Composable
+fun creditChipColors(): ChipColors = if (onDark()) ChipColors(CreditInkDark, CreditSurfaceDark) else ChipColors(CreditInk, CreditSurface)
+
 /** 비중 바의 트랙색과 채움색. 무채색이라 손익·행동 색과 겹치지 않는다. */
 @Composable
 fun barColors(): ChipColors = if (onDark()) ChipColors(BarFillDark, BarTrackDark) else ChipColors(BarFill, BarTrack)

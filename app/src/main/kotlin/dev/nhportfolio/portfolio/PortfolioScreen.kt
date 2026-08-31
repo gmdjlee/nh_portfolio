@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -60,6 +61,7 @@ import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
 import dev.nhportfolio.store.cashKey
+import dev.nhportfolio.store.clearLegacyKeys
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
@@ -68,6 +70,7 @@ import dev.nhportfolio.ui.CloseIcon
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
+import dev.nhportfolio.ui.creditChipColors
 import dev.nhportfolio.ui.deltaChipColors
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
@@ -115,7 +118,7 @@ data class PortfolioUi(
     val error: String? = null,
     /** 현금 행에 합쳐진 현금성 자산 개수. 0 이면 순수 예수금이다. */
     val cashAssets: Int = 0,
-    val cashCodes: Set<String> = emptySet(),
+    val cashKeys: Set<String> = emptySet(),
 )
 
 class PortfolioViewModel(
@@ -143,22 +146,27 @@ class PortfolioViewModel(
                 result.fold({ it to null }, { last to it.userMessage() })
             }.drop(1)
 
+    init {
+        // 신원이 바뀌어 옛 목표는 어느 줄 것인지 알 수 없다 — 한 번 지우고 새로 잡게 한다.
+        viewModelScope.launch { store.edit { clearLegacyKeys(it, acctNo) } }
+    }
+
     val ui: StateFlow<PortfolioUi> =
         combine(
             loads,
             store.data.map { readTargets(it, targetsKey) }.catch { },
             store.data.map { readCashCodes(it, cashKey) }.catch { },
             lastFill,
-        ) { (balance, error), targets, cashCodes, fill ->
+        ) { (balance, error), targets, cashKeys, fill ->
             // 현금성 자산을 먼저 접어야 분모·비중·목표·매매 수량이 모두 같은 기준을 쓴다.
-            val folded = balance?.let { Rebalance.foldCash(it, cashCodes) }
+            val folded = balance?.let { Rebalance.foldCash(it, cashKeys) }
             PortfolioUi(
                 balance = folded,
                 plan = folded?.let { Rebalance.plan(it, targets) },
                 lastFill = fill,
                 error = error,
-                cashAssets = balance?.holdings.orEmpty().count { it.code in cashCodes },
-                cashCodes = cashCodes,
+                cashAssets = balance?.holdings.orEmpty().count { it.key in cashKeys },
+                cashKeys = cashKeys,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
@@ -243,8 +251,8 @@ class PortfolioViewModel(
         ui.value.plan
             ?.lines
             .orEmpty()
-            .filter { it.code != Rebalance.CASH }
-            .associate { it.code to it.weightBp }
+            .filter { it.key != Rebalance.CASH }
+            .associate { it.key to it.weightBp }
 
     private fun edit(transform: (Map<String, Int>) -> Map<String, Int>) {
         viewModelScope.launch {
@@ -342,8 +350,8 @@ fun PortfolioScreen(
         ui.plan
             ?.lines
             .orEmpty()
-            .filter { it.code != Rebalance.CASH }
-            .map { it.code }
+            .filter { it.key != Rebalance.CASH }
+            .map { it.key }
     val selection = selectionOf(selected, selectable)
 
     Scaffold(
@@ -437,7 +445,7 @@ fun PortfolioScreen(
             codes = codes,
             currentBp = currentBp,
             holdings = ui.balance?.holdings.orEmpty(),
-            cashCodes = ui.cashCodes,
+            cashKeys = ui.cashKeys,
             onToggleCash = { code ->
                 vm.toggleCashAsset(code)
                 editing = null
@@ -490,13 +498,31 @@ private fun PortfolioTopBar(
     }
 }
 
+/**
+ * 단건 편집 다이얼로그 제목에 쓸 종목명. 같은 종목코드가 현금분·신용분 두 줄로 갈리면
+ * 상품유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을
+ * 고치는지 알 수 없다. 문구는 NH 가 준 상품유형명([Holding.productType]) 그대로 쓴다.
+ */
+internal fun holdingTitle(
+    holdings: List<Holding>,
+    key: String,
+): String {
+    val holding = holdings.firstOrNull { it.key == key } ?: return key
+    val duplicateCode = holdings.count { it.code == holding.code } > 1
+    return if (duplicateCode && holding.productType.isNotBlank()) {
+        "${holding.name} (${holding.productType})"
+    } else {
+        holding.name
+    }
+}
+
 /** 단건이면 종목 이름을, 일괄이면 개수를 제목에 쓴다. */
 @Composable
 private fun TargetEditor(
     codes: List<String>,
     currentBp: Int?,
     holdings: List<Holding>,
-    cashCodes: Set<String>,
+    cashKeys: Set<String>,
     onToggleCash: (String) -> Unit,
     onDismiss: () -> Unit,
     onSet: (Int?) -> Unit,
@@ -506,13 +532,13 @@ private fun TargetEditor(
         when {
             single == null -> "선택한 ${codes.size}개 종목"
             single == Rebalance.CASH -> "예수금"
-            else -> holdings.firstOrNull { it.code == single }?.name ?: single
+            else -> holdingTitle(holdings, single)
         }
     // 현금성 지정은 단건, 그것도 실제 종목에만 — 예수금 행이나 일괄 편집에는 뜻이 없다.
     val cashToggle =
         single
             ?.takeIf { it != Rebalance.CASH }
-            ?.let { CashToggle(isCash = it in cashCodes, onClick = { onToggleCash(it) }) }
+            ?.let { CashToggle(isCash = it in cashKeys, onClick = { onToggleCash(it) }) }
     TargetDialog(
         name = name,
         currentBp = currentBp,
@@ -670,7 +696,11 @@ private fun SummaryCard(
                 valueColor =
                     when {
                         plan.targetSumBp > FULL_BP -> MaterialTheme.colorScheme.error
-                        plan.targetSumBp == FULL_BP -> MaterialTheme.colorScheme.primary
+
+                        // 신원이 겹치면 100% 도 우연일 뿐이다 — 바로 아래 뜨는 중복 경고와
+                        // 화면이 모순되지 않도록 초록으로 안심시키지 않는다.
+                        plan.targetSumBp == FULL_BP && !plan.duplicateKeys -> MaterialTheme.colorScheme.primary
+
                         else -> MaterialTheme.colorScheme.onSurface
                     },
                 modifier = Modifier.weight(1f),
@@ -719,6 +749,13 @@ private fun PlanWarnings(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        if (plan.duplicateKeys) {
+            Text(
+                "같은 종목이 구분 없이 두 번 왔습니다 — 목표 비중이 두 줄에 겹쳐 매매 수량이 부풀 수 있습니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
@@ -752,21 +789,21 @@ private fun HoldingsList(
     onToggle: (code: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val byCode = remember(balance) { balance.holdings.associateBy { it.code } }
+    val byKey = remember(balance) { balance.holdings.associateBy { it.key } }
     // 막대 눈금은 가장 큰 비중/목표 기준. 절대 눈금이면 작은 종목이 실선이 되어 못 읽는다.
     val scaleBp = remember(plan) { plan.lines.maxOf { maxOf(it.weightBp, it.targetBp ?: 0) }.coerceAtLeast(1) }
     LazyColumn(modifier.fillMaxWidth()) {
         items(plan.lines) { line ->
             HoldingRow(
                 line = line,
-                holding = byCode[line.code],
+                holding = byKey[line.key],
                 cashLabel = cashLabel,
                 selecting = selecting,
-                checked = line.code in selected,
+                checked = line.key in selected,
                 scaleBp = scaleBp,
-                onEdit = { onEdit(line.code, line.targetBp) },
-                onLongPress = { onLongPress(line.code) },
-                onToggle = { onToggle(line.code) },
+                onEdit = { onEdit(line.key, line.targetBp) },
+                onLongPress = { onLongPress(line.key) },
+                onToggle = { onToggle(line.key) },
             )
             HorizontalDivider()
         }
@@ -787,7 +824,7 @@ private fun HoldingRow(
 ) {
     // 예수금은 비례 조정 로직(scaleForCash)을 타야 하므로 선택 대상이 아니다 —
     // 롱프레스도 탭 토글도 받지 않는다. 체크박스가 없다는 사실이 그 설명이다.
-    val selectable = line.code != Rebalance.CASH
+    val selectable = line.key != Rebalance.CASH
     val showCheckbox = selecting && selectable
     Row(
         Modifier
@@ -822,7 +859,24 @@ private fun HoldingRow(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    // weight 는 래퍼가 아니라 이름 Text 에 줘야 한다 — 래퍼에만 있으면 이름이
+                    // 폭 전체를 먼저 가져가 버려 배지가 0dp 로 밀려 사라질 수 있다.
+                    Text(
+                        holding?.name ?: cashLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // 신용/융자 줄에만. 문구는 NH 가 준 상품유형명을 그대로 쓴다 —
+                    // 우리가 지어낸 말보다 실제와 어긋날 위험이 없다.
+                    if (holding?.onCredit == true) CreditChip(holding.productType)
+                }
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
             HoldingDetail(line, holding, scaleBp)
@@ -895,6 +949,21 @@ private fun DeltaChip(delta: Long?) {
             Modifier
                 .background(c.surface, MaterialTheme.shapes.extraSmall)
                 .padding(horizontal = 9.dp, vertical = 3.dp),
+    )
+}
+
+/** 신용/융자 배지. 문구가 비어 있으면 "신용" 으로 대신한다 — 빈 칩은 뜻이 없다. */
+@Composable
+private fun CreditChip(productType: String) {
+    val c = creditChipColors()
+    Text(
+        text = productType.takeIf { it.isNotBlank() } ?: "신용",
+        style = MaterialTheme.typography.labelSmall,
+        color = c.ink,
+        modifier =
+            Modifier
+                .background(c.surface, MaterialTheme.shapes.extraSmall)
+                .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
 

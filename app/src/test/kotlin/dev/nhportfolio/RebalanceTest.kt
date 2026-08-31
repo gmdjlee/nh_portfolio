@@ -29,54 +29,56 @@ class RebalanceTest {
 
     @Test
     fun `자산 비중은 basis point 로 계산된다`() {
-        val b = Balance(cash = 250_000, holdings = listOf(holding("A", 1, 750_000)))
+        val a = holding("A", 1, 750_000)
+        val b = Balance(cash = 250_000, holdings = listOf(a))
         val plan = Rebalance.plan(b, emptyMap())
-        assertEquals(7_500, plan.lines.first { it.code == "A" }.weightBp)
+        assertEquals(7_500, plan.lines.first { it.key == a.key }.weightBp)
         assertEquals(2_500, plan.lines.last().weightBp)
     }
 
     @Test
     fun `목표 주식 수는 내림한다`() {
         // total = 1_000_000, 목표 50% = 500_000, 현재가 45_000 -> 11.11주 -> 11주
-        val b = Balance(cash = 1_000_000, holdings = listOf(holding("A", 0, 45_000, evalAmt = 0)))
-        val plan = Rebalance.plan(b, mapOf("A" to 5_000))
-        assertEquals(11, plan.lines.first { it.code == "A" }.deltaShares)
+        val a = holding("A", 0, 45_000, evalAmt = 0)
+        val b = Balance(cash = 1_000_000, holdings = listOf(a))
+        val plan = Rebalance.plan(b, mapOf(a.key to 5_000))
+        assertEquals(11, plan.lines.first { it.key == a.key }.deltaShares)
     }
 
     @Test
     fun `목표가 없으면 델타는 null 이다`() {
-        val b = Balance(cash = 0, holdings = listOf(holding("A", 3, 1_000)))
+        val a = holding("A", 3, 1_000)
+        val b = Balance(cash = 0, holdings = listOf(a))
         assertNull(
             Rebalance
                 .plan(b, emptyMap())
                 .lines
-                .first { it.code == "A" }
+                .first { it.key == a.key }
                 .deltaShares,
         )
     }
 
     @Test
     fun `현재가가 0 이면 델타는 null 이다`() {
-        val b = Balance(cash = 1_000_000, holdings = listOf(holding("A", 3, 0, evalAmt = 0)))
-        assertNull(
-            Rebalance
-                .plan(b, mapOf("A" to 5_000))
-                .lines
-                .first { it.code == "A" }
-                .deltaShares,
-        )
+        val a = holding("A", 3, 0, evalAmt = 0)
+        val b = Balance(cash = 1_000_000, holdings = listOf(a))
+        val plan = Rebalance.plan(b, mapOf(a.key to 5_000))
+        val line = plan.lines.first { it.key == a.key }
+        assertEquals(5_000, line.targetBp) // 목표가 실제로 걸렸음을 먼저 못 박는다 — 안 그러면 미매칭으로도 통과한다
+        assertNull(line.deltaShares)
     }
 
     @Test
     fun `매도는 음수 델타로 나온다`() {
         // total = 1_000_000, 목표 10% = 100_000, 현재가 10_000 -> 10주 보유 100주 -> -90
-        val b = Balance(cash = 0, holdings = listOf(holding("A", 100, 10_000)))
+        val a = holding("A", 100, 10_000)
+        val b = Balance(cash = 0, holdings = listOf(a))
         assertEquals(
             -90,
             Rebalance
-                .plan(b, mapOf("A" to 1_000))
+                .plan(b, mapOf(a.key to 1_000))
                 .lines
-                .first { it.code == "A" }
+                .first { it.key == a.key }
                 .deltaShares,
         )
     }
@@ -86,18 +88,19 @@ class RebalanceTest {
         val b = Balance(cash = 500_000, holdings = listOf(holding("A", 1, 500_000)))
         val plan = Rebalance.plan(b, mapOf(Rebalance.CASH to 3_000))
         val last = plan.lines.last()
-        assertEquals(Rebalance.CASH, last.code)
+        assertEquals(Rebalance.CASH, last.key)
         assertEquals(3_000, last.targetBp)
         assertNull(last.deltaShares)
     }
 
     @Test
     fun `종목코드 CASH 인 보유는 현금 행이 아니다`() {
-        val b = Balance(cash = 100, holdings = listOf(holding("CASH", 1, 900)))
-        val plan = Rebalance.plan(b, mapOf("CASH" to 1_000))
+        val tickerCash = holding("CASH", 1, 900)
+        val b = Balance(cash = 100, holdings = listOf(tickerCash))
+        val plan = Rebalance.plan(b, mapOf(tickerCash.key to 1_000))
         assertEquals(2, plan.lines.size)
-        assertEquals("CASH", plan.lines[0].code)
-        assertEquals(Rebalance.CASH, plan.lines[1].code)
+        assertEquals(tickerCash.key, plan.lines[0].key)
+        assertEquals(Rebalance.CASH, plan.lines[1].key)
         assertEquals(1_000, plan.lines[0].targetBp)
         assertNull(plan.lines[1].targetBp)
     }
@@ -105,17 +108,19 @@ class RebalanceTest {
     @Test
     fun `목표 합계와 매매 후 예수금을 계산한다`() {
         // total = 1_000_000. A 목표 60% -> 600_000 / 10_000 = 60주, 현재 0주 -> +60 -> 600_000 지출
-        val b = Balance(cash = 1_000_000, holdings = listOf(holding("A", 0, 10_000, evalAmt = 0)))
-        val plan = Rebalance.plan(b, mapOf("A" to 6_000, Rebalance.CASH to 4_000))
+        val a = holding("A", 0, 10_000, evalAmt = 0)
+        val b = Balance(cash = 1_000_000, holdings = listOf(a))
+        val plan = Rebalance.plan(b, mapOf(a.key to 6_000, Rebalance.CASH to 4_000))
         assertEquals(10_000, plan.targetSumBp)
         assertEquals(400_000, plan.cashAfter)
     }
 
     @Test
     fun `예수금이 모자라면 매매 후 예수금이 음수다`() {
-        val b = Balance(cash = 0, holdings = listOf(holding("A", 1, 1_000), holding("B", 1, 1_000)))
+        val a = holding("A", 1, 1_000)
+        val b = Balance(cash = 0, holdings = listOf(a, holding("B", 1, 1_000)))
         // total = 2_000. A 목표 100% -> 2주, 현재 1주 -> +1 -> 1_000 지출, 예수금 0
-        val plan = Rebalance.plan(b, mapOf("A" to 10_000))
+        val plan = Rebalance.plan(b, mapOf(a.key to 10_000))
         assertEquals(-1_000, plan.cashAfter)
     }
 
@@ -153,12 +158,12 @@ class RebalanceTest {
             val targets =
                 holdings.associate { h ->
                     val bp = rnd.nextInt(0, left + 1).also { left -= it }
-                    h.code to bp
+                    h.key to bp
                 }
             val plan = Rebalance.plan(Balance(cash, holdings), targets)
             val bought =
                 holdings.sumOf { h ->
-                    val d = plan.lines.first { it.code == h.code }.deltaShares ?: 0L
+                    val d = plan.lines.first { it.key == h.key }.deltaShares ?: 0L
                     (h.qty + d) * h.price
                 }
             assertTrue(bought <= plan.total, "bought=$bought total=${plan.total}")
@@ -211,13 +216,14 @@ class RebalanceTest {
 
     @Test
     fun `현금성 자산은 예수금에 합쳐지고 목록에서 빠진다`() {
+        val cma = holding("CMA01", 1, 500_000)
         val b =
             Balance(
                 cash = 100_000,
-                holdings = listOf(holding("005930", 10, 70_000), holding("CMA01", 1, 500_000)),
+                holdings = listOf(holding("005930", 10, 70_000), cma),
             )
 
-        val folded = Rebalance.foldCash(b, setOf("CMA01"))
+        val folded = Rebalance.foldCash(b, setOf(cma.key))
 
         assertEquals(600_000, folded.cash)
         assertEquals(listOf("005930"), folded.holdings.map { it.code })
@@ -225,25 +231,24 @@ class RebalanceTest {
 
     @Test
     fun `현금성으로 묶으면 매매 계획에서도 빠진다`() {
-        val b =
-            Balance(
-                cash = 0,
-                holdings = listOf(holding("A", 10, 10_000), holding("CMA01", 1, 900_000)),
-            )
+        val a = holding("A", 10, 10_000)
+        val cma = holding("CMA01", 1, 900_000)
+        val b = Balance(cash = 0, holdings = listOf(a, cma))
         // 총자산 100만. CMA 를 묶으면 현금 90만 + 주식 10만.
-        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf("CMA01")), mapOf("A" to 5_000))
+        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf(cma.key)), mapOf(a.key to 5_000))
 
-        assertNull(plan.lines.firstOrNull { it.code == "CMA01" }, "현금성 자산이 종목 행으로 남았다")
+        assertNull(plan.lines.firstOrNull { it.key == cma.key }, "현금성 자산이 종목 행으로 남았다")
         assertEquals(900_000, plan.lines.last().currentAmt)
         // 목표 50% = 50만 / 1만 = 50주, 현재 10주 -> +40
-        assertEquals(40, plan.lines.first { it.code == "A" }.deltaShares)
+        assertEquals(40, plan.lines.first { it.key == a.key }.deltaShares)
     }
 
     @Test
     fun `현금성 자산의 비중은 현금 행에 반영된다`() {
-        val b = Balance(cash = 0, holdings = listOf(holding("A", 1, 500_000), holding("CMA01", 1, 500_000)))
+        val cma = holding("CMA01", 1, 500_000)
+        val b = Balance(cash = 0, holdings = listOf(holding("A", 1, 500_000), cma))
 
-        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf("CMA01")), emptyMap())
+        val plan = Rebalance.plan(Rebalance.foldCash(b, setOf(cma.key)), emptyMap())
 
         assertEquals(5_000, plan.lines.last().weightBp)
     }
@@ -258,13 +263,15 @@ class RebalanceTest {
 
     @Test
     fun `여러 현금성 자산이 모두 합쳐진다`() {
+        val cma = holding("CMA", 1, 2_000)
+        val mmf = holding("MMF", 1, 3_000)
         val b =
             Balance(
                 cash = 1_000,
-                holdings = listOf(holding("A", 1, 100), holding("CMA", 1, 2_000), holding("MMF", 1, 3_000)),
+                holdings = listOf(holding("A", 1, 100), cma, mmf),
             )
 
-        val folded = Rebalance.foldCash(b, setOf("CMA", "MMF"))
+        val folded = Rebalance.foldCash(b, setOf(cma.key, mmf.key))
 
         assertEquals(6_000, folded.cash)
         assertEquals(listOf("A"), folded.holdings.map { it.code })
@@ -461,10 +468,11 @@ class RebalanceTest {
 
     @Test
     fun `조정 결과를 plan 에 넣으면 목표 합계가 100 퍼센트가 된다`() {
-        val holdings = listOf(holding("A", 10, 1000), holding("B", 10, 2000))
-        val balance = Balance(cash = 5_000, holdings = holdings)
+        val a = holding("A", 10, 1000)
+        val b = holding("B", 10, 2000)
+        val balance = Balance(cash = 5_000, holdings = listOf(a, b))
 
-        val targets = Rebalance.scaleForCash(mapOf("A" to 7000, "B" to 3000), cashBp = 1500)
+        val targets = Rebalance.scaleForCash(mapOf(a.key to 7000, b.key to 3000), cashBp = 1500)
         val plan = Rebalance.plan(balance, targets)
 
         assertEquals(10_000, plan.targetSumBp)
@@ -484,5 +492,92 @@ class RebalanceTest {
             }
             assertTrue(out.values.all { it >= 0 }, "음수 비중이 나왔다: $out")
         }
+    }
+
+    // ---- 고아 목표 (신용상환 등으로 키가 바뀌어 현재 비중에 없는 목표, F2) ----
+
+    @Test
+    fun `현재 비중에 없는 목표 키는 자리를 받지 못하고 살아있는 종목이 room 을 채운다`() {
+        val out =
+            Rebalance.scaleForCash(
+                targetsBp = mapOf("GHOST" to 3000, "B" to 7000),
+                cashBp = 0,
+                currentWeightsBp = mapOf("B" to 5000),
+            )
+
+        assertFalse("GHOST" in out, "고아 목표가 자리를 받았다: $out")
+        assertEquals(10_000, out.getValue("B"))
+    }
+
+    @Test
+    fun `상환으로 고아가 된 목표는 100퍼센트로 맞추기를 눌러도 살아있는 종목만으로 room 을 채운다`() {
+        // F2 재현: 신용상환으로 "005930|신용융자" 키가 사라지고 "005930|위탁" 으로 남았다.
+        // 고아가 된 옛 목표가 room 을 나눠 가지면 살아있는 종목의 목표 합이 room 에 못 미친다
+        // — 목표 합계 화면이 "100%로 맞추기" 를 눌러도 채워지지 않는 것처럼 보인다.
+        val targets = mapOf("005930|신용융자" to 2000, "000660" to 6000)
+        val current = mapOf("005930|위탁" to 2500, "000660" to 7500)
+
+        val out = Rebalance.normalize(targets, current)
+
+        assertFalse("005930|신용융자" in out, "고아 목표가 자리를 차지했다: $out")
+        assertEquals(10_000, out.values.sum(), "살아있는 종목의 목표 합이 room 을 정확히 채우지 못했다: $out")
+    }
+
+    @Test
+    fun `currentWeightsBp 가 비어 있으면 고아 여부를 판단할 수 없어 목표를 그대로 둔다`() {
+        // 데이터 손실 방지 장치: 잔고를 아직 못 받았을 때(currentWeightsBp 가 비어 있을 때)
+        // 걸러내면 사용자가 잡아 둔 목표를 통째로 지우게 된다.
+        val out = Rebalance.scaleForCash(mapOf("GHOST" to 3000, "B" to 7000), cashBp = 0)
+
+        assertEquals(mapOf("GHOST" to 3000, "B" to 7000, Rebalance.CASH to 0), out)
+    }
+
+    // ---- 신원(key) ----
+
+    /** 같은 종목코드가 현금분·신용분으로 두 줄 오면 목표가 각각 걸려야 한다. */
+    @Test
+    fun `같은 종목코드도 상품유형이 다르면 목표가 따로 걸린다`() {
+        val cash = holding("005930", qty = 100, price = 70_000).copy(productType = "위탁")
+        val credit = holding("005930", qty = 50, price = 70_000).copy(productType = "신용융자", loanAmt = 1_000_000)
+        val balance = Balance(cash = 0, holdings = listOf(cash, credit))
+
+        val plan = Rebalance.plan(balance, mapOf(credit.key to 5_000))
+
+        val lines = plan.lines.associateBy { it.key }
+        assertNull(lines.getValue(cash.key).targetBp, "현금분에는 목표가 없어야 한다")
+        assertEquals(5_000, lines.getValue(credit.key).targetBp)
+        // 목표 합계가 두 번 세어지면 10_000 이 된다 — 그게 이 테스트가 막는 결함이다.
+        assertEquals(5_000, plan.targetSumBp)
+    }
+
+    /** 신원이 겹치면 조용히 두 배로 세지 말고 알려야 한다. */
+    @Test
+    fun `신원이 겹치는 줄이 있으면 표시한다`() {
+        val a = holding("005930", qty = 100, price = 70_000).copy(productType = "위탁")
+        val b = holding("005930", qty = 50, price = 70_000).copy(productType = "위탁")
+        val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(a, b)), emptyMap())
+        assertTrue(plan.duplicateKeys)
+    }
+
+    @Test
+    fun `상품유형이 다르면 신원이 겹치지 않는다`() {
+        val a = holding("005930", qty = 100, price = 70_000).copy(productType = "위탁")
+        val b = holding("005930", qty = 50, price = 70_000).copy(productType = "신용융자")
+        val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(a, b)), emptyMap())
+        assertFalse(plan.duplicateKeys)
+    }
+
+    /** 일부 증권사 API 는 대출일자 없음을 "00000000" 으로 채워 보낸다 — 빈 문자열이 아니다. */
+    @Test
+    fun `대출매수일자가 전부 0 이면 신용이 아니다`() {
+        val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "00000000")
+        assertFalse(h.onCredit)
+    }
+
+    /** 고정폭 필드는 "없음" 을 0 대신 공백으로 채워 보낼 수도 있다 — `!= '0'` 이면 공백도 걸린다. */
+    @Test
+    fun `대출매수일자가 공백으로 채워져도 신용이 아니다`() {
+        val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "        ")
+        assertFalse(h.onCredit)
     }
 }
