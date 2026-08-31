@@ -1,11 +1,11 @@
 package dev.nhportfolio.portfolio
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -43,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -63,6 +64,7 @@ import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
 import dev.nhportfolio.ui.BackIcon
+import dev.nhportfolio.ui.CloseIcon
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
@@ -269,6 +271,37 @@ private fun fillMessage(fill: Fill): String {
     return "${fill.name} ${fill.qty.shares()}주 체결 @${fill.price.krw()}$at"
 }
 
+/**
+ * 선택 상태에서 화면이 필요로 하는 값들. [selectable] 에 같은 종목코드가 두 번 들어와도
+ * 어긋나지 않도록 **개수가 아니라 집합**으로 비교한다 — 선택은 코드로 키가 잡히므로
+ * 중복 행은 하나로 세어야 체크박스 상태와 실제 선택이 일치한다.
+ */
+data class Selection(
+    /** 잔고에 아직 있는 선택만. 사라진 종목의 유령 코드는 빠진다. */
+    val codes: Set<String>,
+    val allSelected: Boolean,
+    val hasSelectable: Boolean,
+)
+
+fun selectionOf(
+    selected: Set<String>,
+    selectable: List<String>,
+): Selection {
+    val distinct = selectable.toSet()
+    val codes = selected intersect distinct
+    return Selection(
+        codes = codes,
+        allSelected = distinct.isNotEmpty() && codes.size == distinct.size,
+        hasSelectable = distinct.isNotEmpty(),
+    )
+}
+
+/** 전체 선택 토글. 이미 전부 골랐으면 비우고, 아니면 전부 고른다. */
+fun toggleAll(
+    selection: Selection,
+    selectable: List<String>,
+): Set<String> = if (selection.allSelected) emptySet() else selectable.toSet()
+
 @Composable
 fun PortfolioScreen(
     acctNo: String,
@@ -278,15 +311,24 @@ fun PortfolioScreen(
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    var rebalanceMode by remember { mutableStateOf(false) }
+
+    // 선택은 비어도 모드는 유지한다 — selected.isNotEmpty() 로 유도하면 체결 통보로 종목이
+    // 목록에서 빠질 때 편집 중에 바가 통째로 사라진다.
+    var selecting by remember { mutableStateOf(false) }
 
     /** 편집 대상 종목코드들. 한 개면 단건, 여러 개면 일괄. 예수금은 언제나 단건이다. */
     var editing by remember { mutableStateOf<Pair<List<String>, Int?>?>(null) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
     var confirmClear by remember { mutableStateOf(false) }
 
-    // 보유 탭으로 나가면 선택은 의미가 없다 — 남겨 두면 다시 들어왔을 때 놀란다.
-    if (!rebalanceMode && selected.isNotEmpty()) selected = emptySet()
+    val exitSelection = {
+        selecting = false
+        selected = emptySet()
+    }
+
+    // 선택 모드에서 뒤로가기는 화면을 떠나는 게 아니라 선택을 끝낸다.
+    // 탭이 있을 때는 "보유" 탭이 출구였지만 롱프레스 모드에는 눈에 보이는 출구가 없다.
+    BackHandler(enabled = selecting, onBack = exitSelection)
 
     LaunchedEffect(ui.lastFill) {
         ui.lastFill?.let { fill ->
@@ -295,18 +337,29 @@ fun PortfolioScreen(
         }
     }
 
+    // 고를 수 있는 종목. 예수금은 비례 조정 경로를 타므로 빠진다.
+    val selectable =
+        ui.plan
+            ?.lines
+            .orEmpty()
+            .filter { it.code != Rebalance.CASH }
+            .map { it.code }
+    val selection = selectionOf(selected, selectable)
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { BackIcon() }
-                },
-                actions = {
-                    IconButton(onClick = vm::refresh) { RefreshIcon() }
-                },
+            PortfolioTopBar(
+                acctNo = acctNo,
+                // 리로드 실패로 plan 이 없으면 고를 대상 자체가 없다 — 선택 상단바 대신
+                // 새로고침 가능한 기본 바를 보여준다. selecting(모드 자체)은 그대로 유지된다.
+                selecting = selecting && ui.plan != null,
+                selection = selection,
+                onBack = onBack,
+                onRefresh = vm::refresh,
+                onToggleAll = { selected = toggleAll(selection, selectable) },
+                onExit = exitSelection,
             )
         },
     ) { padding ->
@@ -339,27 +392,28 @@ fun PortfolioScreen(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             )
                         }
-                        SummaryCard(plan, ui.cashAssets) { vm.normalizeTargets() }
-                        ModeSelector(rebalanceMode, balance.holdings.size) { rebalanceMode = it }
-                        SelectAllBar(plan, rebalanceMode, selected) { selected = it }
+                        SummaryCard(plan, ui.cashAssets, balance.holdings.size) { vm.normalizeTargets() }
                         HoldingsList(
                             balance = balance,
                             plan = plan,
-                            rebalanceMode = rebalanceMode,
+                            selecting = selecting,
                             selected = selected,
                             cashLabel = cashLabel(ui.cashAssets),
                             onEdit = { code, bp -> editing = listOf(code) to bp },
+                            onLongPress = { code ->
+                                selecting = true
+                                selected = selection.codes + code
+                            },
                             onToggle = { code ->
-                                selected = if (code in selected) selected - code else selected + code
+                                selected = if (code in selection.codes) selection.codes - code else selection.codes + code
                             },
                             modifier = Modifier.weight(1f),
                         )
-                        if (selected.isNotEmpty()) {
+                        if (selecting) {
                             BatchBar(
-                                count = selected.size,
-                                onClear = { selected = emptySet() },
+                                enabled = selection.codes.isNotEmpty(),
                                 onClearTargets = { confirmClear = true },
-                                onSet = { editing = selected.toList() to null },
+                                onSet = { editing = selection.codes.toList() to null },
                             )
                         }
                     }
@@ -369,12 +423,12 @@ fun PortfolioScreen(
     }
 
     ClearTargetsDialog(
-        count = selected.size.takeIf { confirmClear },
+        count = selection.codes.size.takeIf { confirmClear },
         onDismiss = { confirmClear = false },
         onConfirm = {
-            vm.setTargets(selected.toList(), null)
+            vm.setTargets(selection.codes.toList(), null)
             confirmClear = false
-            selected = emptySet()
+            exitSelection()
         },
     )
 
@@ -393,7 +447,44 @@ fun PortfolioScreen(
                 val single = codes.singleOrNull()
                 if (single != null) vm.setTarget(single, bp) else vm.setTargets(codes, bp)
                 editing = null
-                selected = emptySet()
+                exitSelection()
+            },
+        )
+    }
+}
+
+/**
+ * 화면 상단바. 선택 모드 여부로 계좌번호 상단바와 선택 상단바를 갈아 낀다.
+ *
+ * [PortfolioScreen] 의 순환 복잡도를 낮추려고 분기를 이리로 뺐다 — 판단 자체는 그대로다.
+ */
+@Composable
+private fun PortfolioTopBar(
+    acctNo: String,
+    selecting: Boolean,
+    selection: Selection,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onToggleAll: () -> Unit,
+    onExit: () -> Unit,
+) {
+    if (selecting) {
+        SelectionTopBar(
+            count = selection.codes.size,
+            allSelected = selection.allSelected,
+            anySelected = selection.codes.isNotEmpty(),
+            hasSelectable = selection.hasSelectable,
+            onToggleAll = onToggleAll,
+            onExit = onExit,
+        )
+    } else {
+        TopAppBar(
+            title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
+            navigationIcon = {
+                IconButton(onClick = onBack) { BackIcon() }
+            },
+            actions = {
+                IconButton(onClick = onRefresh) { RefreshIcon() }
             },
         )
     }
@@ -432,73 +523,71 @@ private fun TargetEditor(
 }
 
 /**
- * 리밸런스 탭 머리줄. 전체 선택·해제와 현재 선택 수를 보여준다.
+ * 선택 모드 상단바. 계좌번호 대신 선택 개수를 걸고, 뒤로가기 자리를 나가기가 아니라 선택 취소로 바꾼다.
  *
- * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다 —
- * 체크박스 관례를 그대로 따른다. 예수금은 [total] 에서 빠져 있다(비례 조정 경로를 타야 한다).
+ * 뒤로 화살표를 그대로 두면 "어디로 돌아가는지" 가 모호해진다 — 선택을 끝내는 X 로 갈라 쓴다.
+ * 일부만 골랐을 때는 [ToggleableState.Indeterminate] 로 두고, 누르면 전체 선택으로 간다.
  */
 @Composable
-private fun SelectAllBar(
-    plan: Rebalance.Plan,
-    rebalanceMode: Boolean,
-    selected: Set<String>,
-    onSelectedChange: (Set<String>) -> Unit,
+private fun SelectionTopBar(
+    count: Int,
+    allSelected: Boolean,
+    anySelected: Boolean,
+    hasSelectable: Boolean,
+    onToggleAll: () -> Unit,
+    onExit: () -> Unit,
 ) {
-    if (!rebalanceMode) return
-    val selectable = remember(plan) { plan.lines.filter { it.code != Rebalance.CASH }.map { it.code } }
-    // 잔고가 바뀌어 사라진 종목은 선택에서 뺀다 — 없는 종목에 목표를 쓰면 합계만 어긋나고
-    // 화면 어디에도 보이지 않는다.
-    val stale = selected - selectable.toSet()
-    if (stale.isNotEmpty()) onSelectedChange(selected - stale)
-
-    val total = selectable.size
-    val selectedCount = selectable.count { it in selected }
-    val onToggleAll = { onSelectedChange(if (total > 0 && selectedCount == total) emptySet() else selectable.toSet()) }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = total > 0, onClick = onToggleAll)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TriStateCheckbox(
-            state =
-                when {
-                    total > 0 && selectedCount == total -> ToggleableState.On
-                    selectedCount == 0 -> ToggleableState.Off
-                    else -> ToggleableState.Indeterminate
-                },
-            onClick = onToggleAll,
-            enabled = total > 0,
-        )
-        Text("전체 선택", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.weight(1f))
-        Text("$selectedCount / $total", style = MaterialTheme.typography.bodySmall)
-    }
-    HorizontalDivider()
+    TopAppBar(
+        title = { Text("${count}개 선택", style = MaterialTheme.typography.titleSmall) },
+        navigationIcon = {
+            IconButton(onClick = onExit) {
+                CloseIcon(modifier = Modifier.semantics { contentDescription = "선택 취소" })
+            }
+        },
+        actions = {
+            // 다섯 메뉴 중 유일하게 화면에 글자가 없던 항목 — 부분 선택일 땐 대시만 그려져
+            // 무엇을 하는 체크박스인지 알 수 없었다. contentDescription 은 그대로 두고 글자를 더한다.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("전체 선택", style = MaterialTheme.typography.labelLarge)
+                TriStateCheckbox(
+                    state =
+                        when {
+                            allSelected -> ToggleableState.On
+                            anySelected -> ToggleableState.Indeterminate
+                            else -> ToggleableState.Off
+                        },
+                    onClick = onToggleAll,
+                    enabled = hasSelectable,
+                    modifier = Modifier.semantics { contentDescription = "전체 선택" },
+                )
+            }
+        },
+    )
 }
 
-/** 여러 종목을 고른 동안만 뜨는 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다. */
+/**
+ * 선택 모드 하단 바. 입력한 값은 고른 종목 '각각' 의 목표가 된다.
+ *
+ * 아무것도 안 골랐을 때 버튼을 숨기지 않고 흐리게 남긴다 — 사라지면 무엇이 가능한지 알 수 없다.
+ * 개수와 선택 취소는 상단바가 맡는다(한 화면에 같은 숫자를 두 번 쓰지 않는다).
+ */
 @Composable
 private fun BatchBar(
-    count: Int,
-    onClear: () -> Unit,
+    enabled: Boolean,
     onClearTargets: () -> Unit,
     onSet: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("${count}개 선택", style = MaterialTheme.typography.bodyMedium)
-            Row {
-                // "해제" 는 선택 해제인지 목표 해제인지 헷갈린다 — 둘을 또렷이 갈라 쓴다.
-                TextButton(onClick = onClear) { Text("선택 취소") }
-                TextButton(onClick = onClearTargets) { Text("목표 지우기") }
-                TextButton(onClick = onSet) { Text("목표 설정") }
-            }
+            TextButton(enabled = enabled, onClick = onClearTargets) { Text("목표 지우기") }
+            TextButton(enabled = enabled, onClick = onSet) { Text("목표 설정") }
         }
     }
 }
@@ -529,6 +618,7 @@ private fun ClearTargetsDialog(
 private fun SummaryCard(
     plan: Rebalance.Plan,
     cashAssets: Int,
+    holdingCount: Int,
     onNormalize: () -> Unit,
 ) {
     // 카드 테두리를 걷어내고 총액을 화면에서 가장 큰 글자로 둔다 — 먼저 읽히는 숫자가 총액이다.
@@ -537,11 +627,23 @@ private fun SummaryCard(
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         Column {
-            Text(
-                "총 평가금액",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // 종목 수는 탭 줄에 있었다 — 탭을 지우면서 총액 라벨 옆으로 옮긴다.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    "총 평가금액",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "${holdingCount}종목",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(plan.total.krw(), style = MaterialTheme.typography.displaySmall)
             // 총액 바로 아래 평가손익 — 계좌를 열었을 때 두 번째로 찾는 숫자다.
             if (plan.totalPl != 0L) {
@@ -639,68 +741,14 @@ private fun StatBox(
 }
 
 @Composable
-private fun ModeSelector(
-    rebalanceMode: Boolean,
-    holdingCount: Int,
-    onChange: (Boolean) -> Unit,
-) {
-    // 알약 세그먼트 대신 밑줄 탭 — 테두리가 사라지는 만큼 표에 자리가 남고, 상용 증권앱의 관례다.
-    Column {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                ModeTab("보유", !rebalanceMode) { onChange(false) }
-                ModeTab("리밸런스", rebalanceMode) { onChange(true) }
-            }
-            Text(
-                "${holdingCount}종목",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
-        HorizontalDivider()
-    }
-}
-
-@Composable
-private fun ModeTab(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    // IntrinsicSize.Max 로 열 너비를 글자에 묶는다 — 안 그러면 밑줄의 fillMaxWidth 가
-    // 부모의 남은 폭을 통째로 가져가 첫 탭만 길게 늘어난다.
-    Column(
-        Modifier.clickable(onClick = onClick).width(IntrinsicSize.Max).padding(top = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.titleSmall,
-            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(2.5.dp)
-                .background(if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent),
-        )
-    }
-}
-
-@Composable
 private fun HoldingsList(
     balance: Balance,
     plan: Rebalance.Plan,
-    rebalanceMode: Boolean,
+    selecting: Boolean,
     selected: Set<String>,
     cashLabel: String,
     onEdit: (code: String, currentBp: Int?) -> Unit,
+    onLongPress: (code: String) -> Unit,
     onToggle: (code: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -713,10 +761,11 @@ private fun HoldingsList(
                 line = line,
                 holding = byCode[line.code],
                 cashLabel = cashLabel,
-                rebalanceMode = rebalanceMode,
+                selecting = selecting,
                 checked = line.code in selected,
                 scaleBp = scaleBp,
                 onEdit = { onEdit(line.code, line.targetBp) },
+                onLongPress = { onLongPress(line.code) },
                 onToggle = { onToggle(line.code) },
             )
             HorizontalDivider()
@@ -729,19 +778,32 @@ private fun HoldingRow(
     line: Rebalance.Line,
     holding: Holding?,
     cashLabel: String,
-    rebalanceMode: Boolean,
+    selecting: Boolean,
     scaleBp: Int,
     checked: Boolean,
     onEdit: () -> Unit,
+    onLongPress: () -> Unit,
     onToggle: () -> Unit,
 ) {
-    // 예수금은 비례 조정 로직을 타야 하므로 일괄 선택 대상이 아니다.
-    val selectable = rebalanceMode && line.code != Rebalance.CASH
+    // 예수금은 비례 조정 로직(scaleForCash)을 타야 하므로 선택 대상이 아니다 —
+    // 롱프레스도 탭 토글도 받지 않는다. 체크박스가 없다는 사실이 그 설명이다.
+    val selectable = line.code != Rebalance.CASH
+    val showCheckbox = selecting && selectable
     Row(
-        Modifier.fillMaxWidth().clickable { onEdit() },
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                // 선택 모드의 예수금 행은 아예 비활성이다 — enabled 를 두지 않으면
+                // 눌러도 아무 일이 없으면서 물결만 번져 눌리는 것처럼 보인다.
+                enabled = !selecting || selectable,
+                onLongClickLabel = if (selectable) "선택" else null,
+                onLongClick = if (selectable) onLongPress else null,
+                // 선택 모드의 탭은 선택 토글이다 — 체크박스만이 유일한 표적이면 너무 작다.
+                onClick = { if (selecting) onToggle() else onEdit() },
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (selectable) {
+        if (showCheckbox) {
             Checkbox(
                 checked = checked,
                 onCheckedChange = { onToggle() },
@@ -752,7 +814,7 @@ private fun HoldingRow(
             Modifier
                 .weight(1f)
                 .padding(
-                    start = if (selectable) 4.dp else 20.dp,
+                    start = if (showCheckbox) 4.dp else 20.dp,
                     end = 20.dp,
                     top = 12.dp,
                     bottom = 12.dp,
@@ -763,22 +825,22 @@ private fun HoldingRow(
                 Text(holding?.name ?: cashLabel, style = MaterialTheme.typography.titleMedium)
                 Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
             }
-            HoldingDetail(line, holding, rebalanceMode, scaleBp)
+            HoldingDetail(line, holding, scaleBp)
         }
     }
 }
 
-/** 이름·금액 아래 한 줄. 리밸런스 탭이면 목표와 매매 수량, 아니면 보유 명세를 보여준다. */
+/** 이름·금액 아래. 보유 명세와 목표·매매 수량을 함께 보여준다. */
 @Composable
 private fun HoldingDetail(
     line: Rebalance.Line,
     holding: Holding?,
-    rebalanceMode: Boolean,
     scaleBp: Int,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        // 보유 명세는 요구 항목이라 리밸런스 탭에서만 접는다 — 편집할 때는 밀도가 더 값지다.
-        if (!rebalanceMode && holding != null) {
+        // 주식수·평균매입가·현재가·잔고수량은 요구 항목이라 늘 보여준다.
+        // maxLines 를 걸지 않는다 — 폰트 배율이 크면 줄바꿈되지만, 잘라내면 요구 데이터가 사라진다.
+        if (holding != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
