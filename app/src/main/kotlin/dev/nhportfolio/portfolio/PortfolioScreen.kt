@@ -60,6 +60,7 @@ import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
 import dev.nhportfolio.store.cashKey
+import dev.nhportfolio.store.clearLegacyKeys
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
@@ -142,6 +143,11 @@ class PortfolioViewModel(
             .runningFold(null as Balance? to null as String?) { (last, _), result ->
                 result.fold({ it to null }, { last to it.userMessage() })
             }.drop(1)
+
+    init {
+        // 신원이 바뀌어 옛 목표는 어느 줄 것인지 알 수 없다 — 한 번 지우고 새로 잡게 한다.
+        viewModelScope.launch { store.edit { clearLegacyKeys(it, acctNo) } }
+    }
 
     val ui: StateFlow<PortfolioUi> =
         combine(
