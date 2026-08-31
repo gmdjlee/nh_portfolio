@@ -16,7 +16,7 @@
     a { color: #3F6B4A; } a:hover { color: #2F4A34; }
   </style>
 </helmet>
-<div class="ac" style="width: 390px; height: 844px; background: #F7F8FA; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
+<div class="ac" style="width: 390px; height: 844px; background: #F4F6F8; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
 
   <div style="background: #FFFFFF; flex-shrink: 0;">
     <div style="height: 52px; padding: 0 6px 0 16px; display: flex; align-items: center;">
@@ -31,9 +31,9 @@
     </div>
     <div style="padding: 4px 16px 18px; display: flex; flex-direction: column; gap: 2px;">
       <span class="lab">전체 평가금액</span>
-      <span class="num" style="font-size: 34px; line-height: 1.06; letter-spacing: -.035em;">138,920,000</span>
+      <span class="num" style="font-size: 34px; line-height: 1.06; letter-spacing: -.035em;">138,920,000원</span>
       <div style="display: flex; align-items: baseline; justify-content: space-between; margin-top: 1px;">
-        <span class="num" style="font-size: 15px; color: #D1453B;">+5,240,500 (+3.92%)</span>
+        <span class="num" style="font-size: 15px; color: #D1453B;">+5,240,500원 (+3.92%)</span>
         <span class="lab">3개 계좌</span>
       </div>
     </div>
@@ -86,15 +86,15 @@ class Component extends DCLogic {
     // 포트폴리오 화면의 비중 막대와 같은 형태라 두 화면이 한 언어를 쓴다.
     return {
       accounts: [
-        { name: '종합계좌', nameColor: '#111214', no: '20101036881', stocks: '5', amount: '100,000,000',
-          pl: '+4,182,500 (+4.36%)', plColor: R, dormant: false,
+        { name: '종합계좌', nameColor: '#111214', no: '20101036881', stocks: '5', amount: '100,000,000원',
+          pl: '+4,182,500원 (+4.36%)', plColor: R, dormant: false,
           stockW: '90%', stockLabel: '90.0%', cashLabel: '10.0%' },
-        { name: 'CMA', nameColor: '#111214', no: '20101047992', stocks: '1', amount: '26,420,000',
-          pl: '+820,000 (+3.20%)', plColor: R, dormant: false,
+        { name: 'CMA', nameColor: '#111214', no: '20101047992', stocks: '1', amount: '26,420,000원',
+          pl: '+820,000원 (+3.20%)', plColor: R, dormant: false,
           stockW: '7.6%', stockLabel: '7.6%', cashLabel: '92.4%' },
         // 이름을 아직 안 지은 계좌 — API 가 주는 계좌구분을 흐린 글자로 대신 보여준다.
-        { name: '운영 일반', nameColor: '#9AA1AC', no: '20101055103', stocks: '2', amount: '12,500,000',
-          pl: '+238,000 (+1.94%)', plColor: R, dormant: true,
+        { name: '운영 일반', nameColor: '#9AA1AC', no: '20101055103', stocks: '2', amount: '12,500,000원',
+          pl: '+238,000원 (+1.94%)', plColor: R, dormant: true,
           stockW: '95.9%', stockLabel: '95.9%', cashLabel: '4.1%' },
       ],
     };

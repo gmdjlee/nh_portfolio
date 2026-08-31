@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; }
+    .u { font-family: "Noto Sans KR", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .u .num { font-weight: 700; letter-spacing: -.025em; }
+    .u .lab { font-size: 13px; font-weight: 500; color: #8A9099; }
+    .u .dlab { font-size: 14px; font-weight: 500; color: #8A9099; }
+    .u .dat { font-size: 17px; font-weight: 600; letter-spacing: -.02em; color: #3E4550; }
+    a { color: #3F6B4A; } a:hover { color: #2F4A34; }
+  </style>
+</helmet>
+<div class="u" style="width: 859px; height: 920px; background: #FFFFFF; color: #111214; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="height: 60px; padding: 0 6px 0 10px; display: flex; align-items: center; gap: 4px; border-bottom: 1px solid #EDEFF2; flex-shrink: 0;">
+    <div style="height: 48px; padding: 0 12px; display: flex; align-items: center;">
+      <span style="font-size: 17px; font-weight: 700; color: #3F6B4A;">뒤로</span>
+    </div>
+    <span class="num" style="font-size: 18px; letter-spacing: 0;">20101036881</span>
+    <span style="flex: 1;"></span>
+    <div style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3F6B4A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7"/><path d="M21 3v6h-6"/></svg>
+    </div>
+  </div>
+
+  <div style="padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 14px; border-bottom: 8px solid #F4F6F8; flex-shrink: 0;">
+    <div style="display: flex; flex-direction: column; gap: 2px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <span class="lab">총 평가금액</span>
+        <span class="lab">6종목</span>
+      </div>
+      <span class="num" style="font-size: 41px; line-height: 1.06; letter-spacing: -.035em;">100,000,000원</span>
+      <span class="num" style="font-size: 18px; color: #D1453B;">+4,182,500원 (+4.36%)</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px;">
+        <span class="lab">현금 (D+2)</span>
+        <span class="num" style="font-size: 20px;">10,000,000원</span>
+      </div>
+      <div style="background: #F4F6F8; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px;">
+        <span class="lab">목표 합계</span>
+        <span class="num" style="font-size: 20px; color: #3F6B4A;">100.00%</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex: 1; overflow: hidden;">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+      <div style="padding: 14px 20px 15px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: flex; flex-direction: column; gap: 6px;">
+
+        <span style="display: flex; align-items: center; gap: 7px; min-width: 0;">
+          <span style="font-size: 19px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{r.name}}</span>
+          <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 12px; font-weight: 700; color: #A6273F; background: #FBE9EC; padding: 3px 8px; border-radius: 6px; white-space: nowrap; flex-shrink: 0;">{{r.creditLabel}}</span>
+          </sc-if>
+        </span>
+
+        <span style="display: flex; align-items: baseline; gap: 11px; white-space: nowrap;">
+          <span style="display: flex; align-items: baseline; gap: 5px;"><span class="dlab">{{r.qtyLabel}}</span><span class="dat">{{r.qty}}</span></span>
+          <span style="display: flex; align-items: baseline; gap: 5px;"><span class="dlab">{{r.avgLabel}}</span><span class="dat">{{r.avg}}</span></span>
+          <span style="display: flex; align-items: baseline; gap: 5px;"><span class="dlab">{{r.nowLabel}}</span><span class="dat">{{r.now}}</span></span>
+        </span>
+
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 2px;">
+          <span class="num" style="font-size: 23px;">{{r.amt}}</span>
+          <span class="num" style="font-size: 17px; color: {{r.plc}}; white-space: nowrap;">{{r.pl}}</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 12px; margin-top: 2px;">
+          <div style="width: 220px; height: 10px; border-radius: 5px; background: #EDEFF2; position: relative; flex-shrink: 0;">
+            <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.wNow}}; border-radius: 5px; background: #A9B2BF;"></div>
+            <div style="position: absolute; top: -4px; bottom: -4px; left: {{r.wTgt}}; width: 3px; border-radius: 1.5px; background: #111214;"></div>
+          </div>
+          <span class="num" style="font-size: 14px; color: #444B57; white-space: nowrap;">{{r.wLabel}}</span>
+          <span style="flex: 1;"></span>
+          <span class="num" style="font-size: 15px; color: {{r.dc}}; background: {{r.dbg}}; padding: 4px 11px; border-radius: 8px; white-space: nowrap;">{{r.delta}}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const R = '#D1453B', B = '#2F6BD1';
+    const buy = { dc: '#B5372C', dbg: '#FBE9E7' };
+    const sell = { dc: '#255BB8', dbg: '#E8EFFB' };
+    const flat = { dc: '#6E7481', dbg: '#F1F3F5' };
+    // 펼침(859dp)에서는 타이포를 1.2 배로 올리고 명세 셋을 다 보여준다 —
+    // 폭이 두 배가 넘어 접힘용 크기를 그대로 쓰면 글자가 화면에 비해 작아진다.
+    const d = (qty, avg, now) => ({ qtyLabel: '잔고', qty, avgLabel: '평균', avg, nowLabel: '현재', now });
+    return {
+      rows: [
+        { name: '현대차', amt: '35,617,500원', ...d('150주', '221,000원', '237,450원'),
+          pl: '+7.44%', plc: R, bg: '#FFFFFF',
+          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy },
+        { name: 'SK하이닉스', amt: '11,670,000원', ...d('60주', '178,000원', '194,500원'),
+          pl: '+9.27%', plc: R, bg: '#FFFFFF',
+          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', credit: true, creditLabel: '신용융자', ...sell },
+        { name: '삼성전자', amt: '11,130,000원', ...d('150주', '60,000원', '74,200원'),
+          pl: '+23.67%', plc: R, bg: '#FFFFFF',
+          wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy },
+        { name: '카카오', amt: '13,245,000원', ...d('300주', '52,300원', '44,150원'),
+          pl: '-15.58%', plc: B, bg: '#FFFFFF',
+          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell },
+        { name: 'NAVER', amt: '10,917,500원', ...d('55주', '215,000원', '198,500원'),
+          pl: '-7.67%', plc: B, bg: '#FFFFFF',
+          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', credit: false, creditLabel: '', ...sell },
+        { name: '현금', amt: '10,000,000원', qtyLabel: '', qty: '', avgLabel: '', avg: '', nowLabel: '예수금', now: 'D+2',
+          pl: '', plc: '#6E7481', bg: '#FAFBFC',
+          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', credit: false, creditLabel: '', ...flat },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

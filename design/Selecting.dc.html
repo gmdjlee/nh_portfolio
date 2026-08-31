@@ -33,13 +33,13 @@
         <span class="lab">총 평가금액</span>
         <span class="lab">6종목</span>
       </div>
-      <span class="num" style="font-size: 34px; line-height: 1.06; letter-spacing: -.035em;">100,000,000</span>
-      <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500 (+4.36%)</span>
+      <span class="num" style="font-size: 34px; line-height: 1.06; letter-spacing: -.035em;">100,000,000원</span>
+      <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500원 (+4.36%)</span>
     </div>
     <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
       <div style="background: #F4F6F8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;">
         <span class="lab">현금 (D+2)</span>
-        <span class="num" style="font-size: 17px;">10,000,000</span>
+        <span class="num" style="font-size: 17px;">10,000,000원</span>
       </div>
       <div style="background: #F4F6F8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;">
         <span class="lab">목표 합계</span>
@@ -61,23 +61,22 @@
         </div>
 
         <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-              <span style="font-size: 16px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{r.name}}</span>
-              <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
-                <span style="font-size: 10px; font-weight: 700; color: #A6273F; background: #FBE9EC; padding: 2px 6px; border-radius: 5px; white-space: nowrap; flex-shrink: 0;">{{r.creditLabel}}</span>
-              </sc-if>
-            </span>
-            <span style="flex: 1;"></span>
-            <span style="display: flex; align-items: baseline; gap: 9px; white-space: nowrap; flex-shrink: 0;">
-              <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.qtyLabel}}</span><span class="dat">{{r.qty}}</span></span>
-              <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.nowLabel}}</span><span class="dat">{{r.now}}</span></span>
-            </span>
-          </div>
+          <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+            <span style="font-size: 16px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{r.name}}</span>
+            <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
+              <span style="font-size: 10px; font-weight: 700; color: #A6273F; background: #FBE9EC; padding: 2px 6px; border-radius: 5px; white-space: nowrap; flex-shrink: 0;">{{r.creditLabel}}</span>
+            </sc-if>
+          </span>
 
-          <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span style="display: flex; align-items: baseline; gap: 9px; white-space: nowrap;">
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.qtyLabel}}</span><span class="dat">{{r.qty}}</span></span>
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.avgLabel}}</span><span class="dat">{{r.avg}}</span></span>
+            <span style="display: flex; align-items: baseline; gap: 4px;"><span class="dlab">{{r.nowLabel}}</span><span class="dat">{{r.now}}</span></span>
+          </span>
+
+          <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: 2px;">
             <span class="num" style="font-size: 19px;">{{r.amt}}</span>
-            <span class="num" style="font-size: 14px; color: {{r.plc}};">{{r.pl}}</span>
+            <span class="num" style="font-size: 14px; color: {{r.plc}}; white-space: nowrap;">{{r.pl}}</span>
           </div>
 
           <div style="display: flex; align-items: center; gap: 10px; margin-top: 2px;">
@@ -119,30 +118,30 @@ class Component extends DCLogic {
     // 예수금 목표는 종목 비중을 비례 조정하는 별도 경로라 일괄 설정 대상이 아니다.
     const on = { boxBorder: '#3F6B4A', boxFill: '#3F6B4A', tick: '1' };
     const off = { boxBorder: '#C3C9D2', boxFill: '#FFFFFF', tick: '0' };
-    // 선택 모드는 체크박스가 40px 을 가져가므로 명세를 잔고·현재 둘로 줄인다 —
-    // 평균매입가는 목표를 고르는 판단에 쓰이지 않는다.
-    const d = (qty, now) => ({ qtyLabel: '잔고', qty, nowLabel: '현재', now });
+    // 명세가 제 줄을 쓰므로 체크박스와 자리를 다투지 않는다 — 선택 모드에서도 셋을 다 보여준다.
+    
+    const d = (qty, avg, now) => ({ qtyLabel: '잔고', qty, avgLabel: '평균', avg, nowLabel: '현재', now });
     return {
       rows: [
-        { name: '현대차', amt: '35,617,500', ...d('150주', '237,450'), selectable: true, ...on,
+        { name: '현대차', amt: '35,617,500원', ...d('150주', '221,000원', '237,450원'), selectable: true, ...on,
           pl: '+7.44%', plc: R, bg: '#F3F7F4',
           wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy },
-        { name: '삼성전자', amt: '11,130,000', ...d('150주', '74,200'), selectable: true, ...on,
+        { name: '삼성전자', amt: '11,130,000원', ...d('150주', '60,000원', '74,200원'), selectable: true, ...on,
           pl: '+23.67%', plc: R, bg: '#F3F7F4',
           wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy },
-        { name: '삼성전자', amt: '7,420,000', ...d('100주', '74,200'), selectable: true, ...off,
+        { name: '삼성전자', amt: '7,420,000원', ...d('100주', '81,000원', '74,200원'), selectable: true, ...off,
           pl: '-8.40%', plc: B, bg: '#FFFFFF',
           wNow: '19%', wTgt: '20%', wLabel: '7.42% → 8.00%', delta: '8주 매수', credit: true, creditLabel: '신용융자', ...buy },
-        { name: '카카오', amt: '13,245,000', ...d('300주', '44,150'), selectable: true, ...on,
+        { name: '카카오', amt: '13,245,000원', ...d('300주', '52,300원', '44,150원'), selectable: true, ...on,
           pl: '-15.58%', plc: B, bg: '#F3F7F4',
           wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell },
-        { name: 'SK하이닉스', amt: '11,670,000', ...d('60주', '194,500'), selectable: true, ...off,
+        { name: 'SK하이닉스', amt: '11,670,000원', ...d('60주', '178,000원', '194,500원'), selectable: true, ...off,
           pl: '+9.27%', plc: R, bg: '#FFFFFF',
           wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', credit: false, creditLabel: '', ...sell },
-        { name: 'NAVER', amt: '10,917,500', ...d('55주', '198,500'), selectable: true, ...off,
+        { name: 'NAVER', amt: '10,917,500원', ...d('55주', '215,000원', '198,500원'), selectable: true, ...off,
           pl: '-7.67%', plc: B, bg: '#FFFFFF',
           wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', credit: false, creditLabel: '', ...sell },
-        { name: '현금', amt: '10,000,000', qtyLabel: '', qty: '', nowLabel: '예수금', now: 'D+2',
+        { name: '현금', amt: '10,000,000원', qtyLabel: '', qty: '', avgLabel: '', avg: '', nowLabel: '예수금', now: 'D+2',
           selectable: false, ...off,
           pl: '', plc: '#6E7481', bg: '#FAFBFC',
           wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '유지', credit: false, creditLabel: '', ...flat },
