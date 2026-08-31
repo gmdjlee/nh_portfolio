@@ -580,4 +580,26 @@ class RebalanceTest {
         val h = holding("A", 1, 1_000).copy(loanAmt = 0, loanDate = "        ")
         assertFalse(h.onCredit)
     }
+
+    /**
+     * 화면은 줄과 보유를 **위치로** 짝짓는다(신원으로 찾으면 중복 시 한쪽이 삼켜진다).
+     * 이 순서가 깨지면 행이 남의 보유수량·평균가·배지를 보여주므로 여기서 못 박는다.
+     */
+    @Test
+    fun `줄은 보유 순서를 그대로 따르고 마지막이 현금 행이다`() {
+        val a = holding("A", 10, 1_000)
+        val b = holding("B", 20, 2_000)
+        val plan = Rebalance.plan(Balance(cash = 500, holdings = listOf(a, b)), emptyMap())
+        assertEquals(listOf(a.key, b.key, Rebalance.CASH), plan.lines.map { it.key })
+    }
+
+    /** 신원이 겹쳐도 줄은 보유 수만큼 나오고 각자의 금액을 갖는다 — 화면이 위치로 찾을 수 있는 근거. */
+    @Test
+    fun `신원이 겹쳐도 줄은 보유마다 따로 나온다`() {
+        val cash = holding("005930", 100, 70_000)
+        val credit = holding("005930", 50, 70_000).copy(loanAmt = 1_000_000)
+        val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(cash, credit)), emptyMap())
+        assertEquals(3, plan.lines.size)
+        assertEquals(listOf(7_000_000L, 3_500_000L), plan.lines.dropLast(1).map { it.currentAmt })
+    }
 }

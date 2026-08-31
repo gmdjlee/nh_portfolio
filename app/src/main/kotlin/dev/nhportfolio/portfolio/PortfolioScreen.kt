@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -789,14 +789,17 @@ private fun HoldingsList(
     onToggle: (code: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val byKey = remember(balance) { balance.holdings.associateBy { it.key } }
+    // 줄과 보유를 **위치로** 짝짓는다. 신원(key)으로 찾으면 안 된다 — 같은 종목의 현금분과
+    // 신용분이 같은 신원을 갖고 올 수 있고, 그러면 맵이 하나를 삼켜 두 줄이 같은 보유수량과
+    // 같은 배지를 보여준다. plan.lines 는 holdings 를 순서대로 옮기고 끝에 현금 행을 붙인 것이라
+    // 위치가 곧 짝이다(RebalanceTest 가 이 순서를 못 박는다). 현금 행은 index 가 넘어가 null 이 된다.
     // 막대 눈금은 가장 큰 비중/목표 기준. 절대 눈금이면 작은 종목이 실선이 되어 못 읽는다.
     val scaleBp = remember(plan) { plan.lines.maxOf { maxOf(it.weightBp, it.targetBp ?: 0) }.coerceAtLeast(1) }
     LazyColumn(modifier.fillMaxWidth()) {
-        items(plan.lines) { line ->
+        itemsIndexed(plan.lines) { index, line ->
             HoldingRow(
                 line = line,
-                holding = byKey[line.key],
+                holding = balance.holdings.getOrNull(index),
                 cashLabel = cashLabel,
                 selecting = selecting,
                 checked = line.key in selected,
