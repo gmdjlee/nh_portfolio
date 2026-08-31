@@ -30,7 +30,7 @@
     <div style="display: flex; flex-direction: column; gap: 1px;">
       <div style="display: flex; align-items: baseline; justify-content: space-between;">
         <span style="font-size: 12px; font-weight: 500; color: #6E7481;">총 평가금액</span>
-        <span style="font-size: 12px; color: #6E7481;">5종목</span>
+        <span style="font-size: 12px; color: #6E7481;">6종목</span>
       </div>
       <span class="num" style="font-size: 33px; line-height: 1.08;">100,000,000</span>
       <span class="num" style="font-size: 15px; color: #D1453B;">+4,182,500 (+4.36%)</span>
@@ -48,7 +48,7 @@
   </div>
 
   <div style="flex: 1; overflow: hidden;">
-    <sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
       <div style="padding: 10px 16px 11px 8px; border-bottom: 1px solid #F0F2F4; background: {{r.bg}}; display: flex; align-items: flex-start; gap: 4px;">
         <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <sc-if value="{{r.selectable}}" hint-placeholder-val="{{ true }}">
@@ -56,7 +56,12 @@
           </sc-if>
         </div>
         <div style="flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: baseline;">
-          <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
+          <span style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+            <span style="font-size: 15px; font-weight: 700;">{{r.name}}</span>
+            <sc-if value="{{r.credit}}" hint-placeholder-val="{{ false }}">
+              <span style="font-size: 10px; font-weight: 700; color: #6A5B4B; background: #F2EEE9; padding: 2px 6px; border-radius: 5px; white-space: nowrap;">{{r.creditLabel}}</span>
+            </sc-if>
+          </span>
           <span class="num" style="font-size: 17px; text-align: right;">{{r.amt}}</span>
           <span style="font-size: 12px; color: #6E7481;">{{r.sub}}</span>
           <span class="num" style="font-size: 13px; color: {{r.plc}}; text-align: right;">{{r.pl}}</span>
@@ -95,17 +100,21 @@ class Component extends DCLogic {
     return {
       rows: [
         { name: '현대차', amt: '35,617,500', sub: '보유 150주 · 잔고 150주 · 평균 233,000 · 현재 237,450', pl: '+7.44%', plc: R, bg: '#F4F7F5',
-          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', ...buy, ...on },
-        { name: '삼성전자', amt: '18,550,000', sub: '보유 250주 · 잔고 250주 · 평균 68,400 · 현재 74,200', pl: '+8.48%', plc: R, bg: '#F4F7F5',
-          wNow: '46%', wTgt: '50%', wLabel: '18.55% → 20.00%', delta: '19주 매수', ...buy, ...on },
+          wNow: '89%', wTgt: '100%', wLabel: '35.62% → 40.00%', delta: '18주 매수', credit: false, creditLabel: '', ...buy, ...on },
+        // 삼성전자는 현금분·신용분 두 줄로 온다 — 평가금액·평균가·목표가 각자 독립이고, 체크 상태도 따로 논다.
+        // 현금분만 고른 채로 둬서 두 줄이 독립적으로 선택된다는 것을 보여준다.
+        { name: '삼성전자', amt: '11,130,000', sub: '보유 150주 · 잔고 150주 · 평균 68,400 · 현재 74,200', pl: '+8.48%', plc: R, bg: '#F4F7F5',
+          wNow: '28%', wTgt: '30%', wLabel: '11.13% → 12.00%', delta: '12주 매수', credit: false, creditLabel: '', ...buy, ...on },
+        { name: '삼성전자', amt: '7,420,000', sub: '보유 100주 · 잔고 100주 · 평균 79,000 · 현재 74,200', pl: '-6.08%', plc: B, bg: '#FFFFFF',
+          wNow: '19%', wTgt: '20%', wLabel: '7.42% → 8.00%', delta: '8주 매수', credit: true, creditLabel: '신용융자', ...buy, ...off },
         { name: '카카오', amt: '13,245,000', sub: '보유 300주 · 잔고 300주 · 평균 52,300 · 현재 44,150', pl: '-15.58%', plc: B, bg: '#F4F7F5',
-          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', ...sell, ...on },
+          wNow: '33%', wTgt: '25%', wLabel: '13.25% → 10.00%', delta: '74주 매도', credit: false, creditLabel: '', ...sell, ...on },
         { name: 'SK하이닉스', amt: '11,670,000', sub: '보유 60주 · 잔고 60주 · 평균 178,000 · 현재 194,500', pl: '+9.27%', plc: R, bg: '#FFFFFF',
-          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', ...sell, ...off },
+          wNow: '29%', wTgt: '25%', wLabel: '11.67% → 10.00%', delta: '9주 매도', credit: false, creditLabel: '', ...sell, ...off },
         { name: 'NAVER', amt: '10,917,500', sub: '보유 55주 · 잔고 55주 · 평균 215,000 · 현재 198,500', pl: '-7.67%', plc: B, bg: '#FFFFFF',
-          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', ...sell, ...off },
+          wNow: '27%', wTgt: '25%', wLabel: '10.92% → 10.00%', delta: '5주 매도', credit: false, creditLabel: '', ...sell, ...off },
         { name: '현금', amt: '10,000,000', sub: '', pl: '', plc: '#6E7481', bg: '#FAFBFC',
-          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '—', ...flat, ...none },
+          wNow: '25%', wTgt: '25%', wLabel: '10.00% → 10.00%', delta: '—', credit: false, creditLabel: '', ...flat, ...none },
       ],
     };
   }
