@@ -1,18 +1,22 @@
 package dev.nhportfolio.accounts
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -30,7 +34,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -71,7 +78,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
-private val PIE_SIZE = 22.dp
+private val BAR_HEIGHT = 8.dp
 
 /** [summary] 가 null 이면 아직 조회 중이다. 목록은 요약을 기다리지 않고 먼저 그린다. */
 data class AccountRow(
@@ -216,14 +223,19 @@ fun AccountsScreen(
                 else -> {
                     Column(Modifier.fillMaxSize()) {
                         TotalCard(rows)
-                        LazyColumn(Modifier.fillMaxSize()) {
+                        // 계좌 하나를 카드로 세운다 — 목록이 아니라 '들어갈 곳' 이라는 사실이
+                        // 형태로 드러나고, 구분선만 그을 때보다 계좌끼리 훨씬 잘 갈린다.
+                        LazyColumn(
+                            Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
                             items(rows, key = { it.no }) { row ->
-                                AccountRowItem(
+                                AccountCard(
                                     row = row,
                                     onOpen = { onOpen(row.no) },
                                     onRename = { renaming = row },
                                 )
-                                HorizontalDivider()
                             }
                         }
                     }
@@ -278,43 +290,63 @@ private fun TotalCard(rows: List<AccountRow>) {
 }
 
 @Composable
-private fun AccountRowItem(
+private fun AccountCard(
     row: AccountRow,
     onOpen: () -> Unit,
     onRename: () -> Unit,
 ) {
     val plan = row.plan
     Column(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, top = 13.dp, bottom = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onOpen)
+            .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 14.dp),
     ) {
-        Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // 이름이 없으면 계좌구분을 흐린 글자로 — 지어낸 이름이 아니라는 걸 색으로 알린다.
             Text(
                 row.name ?: "운영 계좌",
                 style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color =
                     if (row.name != null) {
                         MaterialTheme.colorScheme.onSurface
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                modifier = Modifier.weight(1f, fill = false),
             )
             Spacer(Modifier.weight(1f))
+            // 이름 수정은 카드 열기와 다른 44dp 대상이라 서로 잡아먹지 않는다.
+            // 대상은 왼쪽으로 넓히고 연필 자체는 오른쪽 끝선에 붙인다 — IconButton 은 아이콘을
+            // 한가운데 두어서, 같은 자리에 오른쪽 정렬된 금액·손익보다 15dp 안쪽으로 들어가 보인다.
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRename),
+                contentAlignment = Alignment.CenterEnd,
+            ) { PencilIcon() }
+        }
+        Text(
+            row.no + (plan?.let { " · ${it.lines.size - 1}종목" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
             Text(
                 plan?.total?.krw() ?: if (row.summary == null) "조회 중" else "조회 실패",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
                 color =
                     if (plan != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                row.no + (plan?.let { " · ${it.lines.size - 1}종목" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
             plan?.takeIf { it.totalPl != 0L }?.let {
                 Text(
                     "${if (it.totalPl > 0) "+" else ""}${it.totalPl.krw()} (${it.totalPlRate.pct()})",
@@ -323,27 +355,38 @@ private fun AccountRowItem(
                 )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            plan?.let { Composition(it) }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRename) { PencilIcon() }
-        }
+        plan?.let { Composition(it) }
     }
 }
 
-/** 주식·현금 구성. 파이 한 조각과 같은 색상의 라벨. */
+/**
+ * 주식·현금 구성. 22dp 파이가 아니라 가른 막대다 — 색은 그대로지만 비율이 눈금 없이 읽히고,
+ * 포트폴리오 화면의 비중 막대와 같은 형태라 두 화면이 한 언어를 쓴다.
+ */
 @Composable
 private fun Composition(plan: Rebalance.Plan) {
     val c = compositionColors()
     val cash = plan.lines.last().currentAmt
     val stockFraction = if (plan.total > 0) (plan.total - cash).toFloat() / plan.total else 0f
-    Canvas(Modifier.size(PIE_SIZE)) {
-        drawArc(c.cash, -90f, 360f, useCenter = true)
-        drawArc(c.stock, -90f, 360f * stockFraction, useCenter = true)
+    Column(Modifier.padding(top = 11.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(BAR_HEIGHT)
+                .clip(CircleShape)
+                .background(c.cash),
+        ) {
+            Box(Modifier.fillMaxWidth(stockFraction.coerceIn(0f, 1f)).fillMaxHeight().background(c.stock))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("주식 ${(stockFraction * 100).pct2()}", style = MaterialTheme.typography.bodySmall, color = c.stockInk)
+            Text(
+                "현금 ${((1 - stockFraction) * 100).pct2()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.cashInk,
+            )
+        }
     }
-    Text("주식 ${(stockFraction * 100).pct2()}", style = MaterialTheme.typography.bodySmall, color = c.stockInk)
-    Text("·", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outlineVariant)
-    Text("현금 ${((1 - stockFraction) * 100).pct2()}", style = MaterialTheme.typography.bodySmall, color = c.cashInk)
 }
 
 /** 부호 없는 퍼센트 — [pct] 는 수익률용이라 항상 부호를 붙인다. */

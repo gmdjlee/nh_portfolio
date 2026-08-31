@@ -2,6 +2,7 @@ package dev.nhportfolio.portfolio
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,9 +46,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -65,13 +70,15 @@ import dev.nhportfolio.store.clearLegacyKeys
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
-import dev.nhportfolio.ui.BackIcon
+import dev.nhportfolio.ui.ChevronIcon
 import dev.nhportfolio.ui.CloseIcon
+import dev.nhportfolio.ui.DetailColors
 import dev.nhportfolio.ui.RefreshIcon
 import dev.nhportfolio.ui.barColors
 import dev.nhportfolio.ui.bpPct
 import dev.nhportfolio.ui.creditChipColors
 import dev.nhportfolio.ui.deltaChipColors
+import dev.nhportfolio.ui.detailColors
 import dev.nhportfolio.ui.krw
 import dev.nhportfolio.ui.pct
 import dev.nhportfolio.ui.plColor
@@ -107,7 +114,11 @@ private data class CashToggle(
 )
 
 private const val FULL_BP = 10_000
-private val BAR_WIDTH = 64.dp
+
+// 비중 막대는 줄 하나를 혼자 쓴다 — 64dp 로는 10% 와 12% 의 차이가 눈에 잡히지 않았다.
+// 선택 모드에서는 체크박스가 앞자리를 가져가므로 그만큼 줄인다.
+private val BAR_WIDTH = 150.dp
+private val BAR_WIDTH_SELECTING = 128.dp
 private val TARGET_INPUT = Regex("""^\d{1,3}(\.\d{1,2})?$""")
 
 /** [balance] 와 [error] 가 모두 null 이면 최초 로딩. 오류가 나도 마지막 정상 표는 유지한다. */
@@ -480,8 +491,10 @@ private fun PortfolioTopBar(
     } else {
         TopAppBar(
             title = { Text(acctNo, style = MaterialTheme.typography.titleSmall) },
+            // 뒤로는 설정 화면과 같은 "뒤로" 글자다 — 화면마다 다른 컨트롤을 쓰면
+            // 같은 자리에 있는 같은 동작이 다른 것처럼 보인다.
             navigationIcon = {
-                IconButton(onClick = onBack) { BackIcon() }
+                TextButton(onClick = onBack) { Text("뒤로") }
             },
             actions = {
                 IconButton(onClick = onRefresh) { RefreshIcon() }
@@ -850,18 +863,20 @@ private fun HoldingRow(
                     start = if (showCheckbox) 4.dp else 20.dp,
                     end = 20.dp,
                     top = 12.dp,
-                    bottom = 12.dp,
+                    bottom = 13.dp,
                 ),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // 1줄 — 누구인가. 명세는 여기 이름 오른쪽에 붙는다.
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f, fill = false),
+                    // weight 는 명세가 아니라 이름 쪽 래퍼에 준다 — 명세(무가중)가 먼저 제 폭을
+                    // 재고, 남는 자리를 이름이 가진다. 반대로 하면 긴 이름이 폭을 다 먹어
+                    // 명세가 0dp 로 밀려 사라진다.
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
                 ) {
-                    // weight 는 래퍼가 아니라 이름 Text 에 줘야 한다 — 래퍼에만 있으면 이름이
-                    // 폭 전체를 먼저 가져가 버려 배지가 0dp 로 밀려 사라질 수 있다.
                     Text(
                         holding?.name ?: cashLabel,
                         style = MaterialTheme.typography.titleMedium,
@@ -873,49 +888,76 @@ private fun HoldingRow(
                     // 우리가 지어낸 말보다 실제와 어긋날 위험이 없다.
                     if (holding?.onCredit == true) CreditChip(holding.productType)
                 }
-                Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleMedium)
+                HoldingSpecs(holding)
             }
-            HoldingDetail(line, holding, scaleBp)
+            // 2줄 — 얼마인가.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(line.currentAmt.krw(), style = MaterialTheme.typography.titleLarge)
+                if (holding != null) {
+                    Text(
+                        holding.pnlRate.pct(),
+                        color = plColor(holding.pnlRate),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
+            }
+            // 3줄 — 무엇을 할 것인가.
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                WeightBar(
+                    weightBp = line.weightBp,
+                    targetBp = line.targetBp,
+                    scaleBp = scaleBp,
+                    width = if (showCheckbox) BAR_WIDTH_SELECTING else BAR_WIDTH,
+                )
+                Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.weight(1f))
+                // 목표가 없으면 칩을 띄우지 않는다 — "—" 로 채우면 진짜 할 일이 묻힌다.
+                if (line.targetBp != null) DeltaChip(line.deltaShares)
+            }
         }
     }
 }
 
-/** 이름·금액 아래. 보유 명세와 목표·매매 수량을 함께 보여준다. */
+/**
+ * 잔고수량·평균매입가·현재가. 종목명과 같은 줄의 오른쪽 끝에 붙는다.
+ *
+ * 라벨은 작고 흐리게, 숫자는 크고 진하게 갈라 둔다 — 한 줄에 여섯 조각이 들어가도
+ * 숫자가 먼저 읽힌다. 줄바꿈은 막는다: 여기서 접히면 세 줄 구조가 무너진다.
+ *
+ * **보유수량은 넣지 않는다.** 잔고수량과 값이 같은 경우가 대부분이라 폭만 먹고,
+ * 세 항목만으로도 이미 이름이 밀려날 만큼 넓다. 예수금 행은 명세가 없어 비운다.
+ */
 @Composable
-private fun HoldingDetail(
-    line: Rebalance.Line,
-    holding: Holding?,
-    scaleBp: Int,
+private fun HoldingSpecs(holding: Holding?) {
+    if (holding == null) return
+    val c = detailColors()
+    val valueStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+    Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.Bottom) {
+        Spec("잔고", "${holding.remainQty.shares()}주", c, valueStyle)
+        Spec("평균", holding.avgPrice.krw(), c, valueStyle)
+        Spec("현재", holding.price.krw(), c, valueStyle)
+    }
+}
+
+/** 명세 한 조각. 라벨과 숫자를 밑선으로 맞춘다. */
+@Composable
+private fun Spec(
+    label: String,
+    value: String,
+    colors: DetailColors,
+    valueStyle: TextStyle,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        // 주식수·평균매입가·현재가·잔고수량은 요구 항목이라 늘 보여준다.
-        // maxLines 를 걸지 않는다 — 폰트 배율이 크면 줄바꿈되지만, 잘라내면 요구 데이터가 사라진다.
-        if (holding != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    "보유 ${holding.qty.shares()}주 · 잔고 ${holding.remainQty.shares()}주 · " +
-                        "평균 ${holding.avgPrice.krw()} · 현재 ${holding.price.krw()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Text(
-                    holding.pnlRate.pct(),
-                    color = plColor(holding.pnlRate),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(top = 3.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            WeightBar(line.weightBp, line.targetBp, scaleBp)
-            Text(weightArrow(line), style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.weight(1f))
-            // 목표가 없으면 칩을 띄우지 않는다 — "—" 로 채우면 진짜 할 일이 묻힌다.
-            if (line.targetBp != null) DeltaChip(line.deltaShares)
-        }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = colors.label, maxLines = 1)
+        Text(value, style = valueStyle, color = colors.value, maxLines = 1)
     }
 }
 
@@ -975,16 +1017,17 @@ private fun WeightBar(
     weightBp: Int,
     targetBp: Int?,
     scaleBp: Int,
+    width: Dp,
 ) {
     val c = barColors()
     val scale = scaleBp.coerceAtLeast(1).toFloat()
     // 목표선이 막대 위아래로 조금 삐져나와야 눈에 걸린다 — 그래서 트랙보다 컨테이너가 높다.
-    Box(Modifier.width(BAR_WIDTH).height(13.dp), contentAlignment = Alignment.CenterStart) {
-        Box(Modifier.fillMaxWidth().height(7.dp).background(c.surface, CircleShape))
+    Box(Modifier.width(width).height(16.dp), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxWidth().height(8.dp).background(c.surface, CircleShape))
         Box(
             Modifier
                 .fillMaxWidth((weightBp / scale).coerceIn(0f, 1f))
-                .height(7.dp)
+                .height(8.dp)
                 .background(c.ink, CircleShape),
         )
         targetBp?.let { t ->
@@ -992,7 +1035,12 @@ private fun WeightBar(
                 Modifier.fillMaxWidth((t / scale).coerceIn(0f, 1f)).fillMaxHeight(),
                 contentAlignment = Alignment.CenterEnd,
             ) {
-                Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface))
+                Box(
+                    Modifier
+                        .width(2.5.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.onSurface, CircleShape),
+                )
             }
         }
     }
@@ -1030,25 +1078,63 @@ private fun TargetDialog(
             ?.let { (it * 100).roundToInt() }
             ?.takeIf { it in 0..FULL_BP }
 
+    val invalid = text.isNotBlank() && parsedBp == null
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("$name 목표 비중") },
+        // 종목명과 "목표 비중" 을 두 줄로 가른다 — 한 줄로 이으면 긴 종목명에서 제목이
+        // 접히면서 무엇을 고치는 화면인지가 두 번째 줄로 밀린다.
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "목표 비중",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 입력값 자체를 화면에서 가장 큰 글자로 둔다 — 이 창은 숫자 하나를 고치는 곳이다.
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("퍼센트 (0 ~ 100)") },
+                    textStyle = MaterialTheme.typography.displaySmall.copy(fontSize = 30.sp),
+                    placeholder = {
+                        Text(
+                            "0",
+                            style = MaterialTheme.typography.displaySmall.copy(fontSize = 30.sp),
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                    },
+                    trailingIcon = { Text("%", style = MaterialTheme.typography.titleMedium) },
                     singleLine = true,
-                    isError = text.isNotBlank() && parsedBp == null,
+                    isError = invalid,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                if (text.isNotBlank() && parsedBp == null) {
-                    Text("0 ~ 100 사이 숫자를 입력하세요", color = MaterialTheme.colorScheme.error)
-                }
+                Text(
+                    "0 ~ 100 사이 숫자를 입력하세요",
+                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                        if (invalid) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                )
                 if (cashToggle != null) {
-                    TextButton(onClick = cashToggle.onClick, modifier = Modifier.padding(top = 8.dp)) {
+                    HorizontalDivider(Modifier.padding(top = 4.dp))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = cashToggle.onClick)
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(if (cashToggle.isCash) "현금성 자산에서 빼기" else "현금성 자산으로 묶기")
+                        Spacer(Modifier.weight(1f))
+                        ChevronIcon()
                     }
                 }
             }
@@ -1058,7 +1144,11 @@ private fun TargetDialog(
         },
         dismissButton = {
             Row {
-                if (currentBp != null) TextButton(onClick = { onSet(null) }) { Text("목표 삭제") }
+                if (currentBp != null) {
+                    TextButton(onClick = { onSet(null) }) {
+                        Text("목표 삭제", color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 TextButton(onClick = onDismiss) { Text("취소") }
             }
         },

@@ -78,11 +78,30 @@ internal val BarFill = Color(0xFFA9B2BF)
 internal val BarTrackDark = Color(0xFF232A34)
 internal val BarFillDark = Color(0xFF5A6472)
 
-/** 신용/융자 배지. 손익·조작·구성 파이가 쓰는 색을 모두 피한 중성색 — 배지는 경고가 아니라 분류다. */
-internal val CreditInk = Color(0xFF6A5B4B)
-internal val CreditSurface = Color(0xFFF2EEE9)
-internal val CreditInkDark = Color(0xFFC8B69F)
-internal val CreditSurfaceDark = Color(0xFF2A241E)
+/**
+ * 종목 행 명세(잔고·평균·현재)의 라벨색과 숫자색.
+ *
+ * 라벨은 흐리게, 숫자는 진하게 갈라 둔다 — 한 줄에 여섯 조각이 들어가도 숫자가 먼저 읽힌다.
+ * onSurfaceVariant 하나로 둘을 다 칠하면 라벨과 숫자가 같은 무게로 읽혀 줄이 뭉갠다.
+ */
+internal val DetailLabel = Color(0xFF8A9099)
+internal val DetailValue = Color(0xFF3E4550)
+internal val DetailLabelDark = Color(0xFF7C838F)
+internal val DetailValueDark = Color(0xFFC9CFD8)
+
+/**
+ * 신용/융자 배지 — 빌린 돈으로 산 줄이라는 표시.
+ *
+ * 같은 빨강 계열이 이미 셋(상승 [ProfitRed], 매수 [BuyInk], 오류 [Ember]) 있는데 전부
+ * 주황빛 빨강이다. 배지는 그보다 차고 깊은 진홍으로 갈라 둔다 — 이름 바로 뒤라는 자리와
+ * 11sp 라는 크기까지 겹치지 않아 한 행에서 셋을 동시에 봐도 서로 섞이지 않는다.
+ *
+ * 대비는 계산값이다: 밝은 배경 6.02:1, 어두운 배경 6.95:1 (각자의 칩 배경 대비, AA 통과).
+ */
+internal val CreditInk = Color(0xFFA6273F)
+internal val CreditSurface = Color(0xFFFBE9EC)
+internal val CreditInkDark = Color(0xFFEE8D9C)
+internal val CreditSurfaceDark = Color(0xFF2E1A1F)
 
 private val LightScheme =
     lightColorScheme(
@@ -141,13 +160,21 @@ private val NhTypography =
         base.copy(
             displaySmall =
                 base.displaySmall.copy(
-                    fontSize = 33.sp,
+                    fontSize = 34.sp,
                     lineHeight = 36.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.8).sp,
+                    letterSpacing = (-1.2).sp,
                     fontFeatureSettings = "tnum",
                 ),
-            titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
+            // 종목 한 줄의 평가금액. 이름(titleMedium 16sp)보다 크게 잡아 돈이 먼저 읽히게 한다.
+            titleLarge =
+                base.titleLarge.copy(
+                    fontSize = 19.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    fontFeatureSettings = "tnum",
+                ),
             titleMedium =
                 base.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
