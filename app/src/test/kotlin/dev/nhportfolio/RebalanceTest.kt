@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -596,10 +597,38 @@ class RebalanceTest {
     /** 신원이 겹쳐도 줄은 보유 수만큼 나오고 각자의 금액을 갖는다 — 화면이 위치로 찾을 수 있는 근거. */
     @Test
     fun `신원이 겹쳐도 줄은 보유마다 따로 나온다`() {
-        val cash = holding("005930", 100, 70_000)
-        val credit = holding("005930", 50, 70_000).copy(loanAmt = 1_000_000)
+        val cash = holding("005930", 100, 70_000).copy(productType = "위탁")
+        val credit = holding("005930", 50, 70_000).copy(productType = "위탁")
         val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(cash, credit)), emptyMap())
         assertEquals(3, plan.lines.size)
         assertEquals(listOf(7_000_000L, 3_500_000L), plan.lines.dropLast(1).map { it.currentAmt })
+    }
+
+    /**
+     * 실계좌에서 확인한 모양(2026-08-31): NH 가 `pdt_tp_nm` 을 비워 보내고 대출 정보만 다르게 준다.
+     * 상품유형명만으로 키를 만들면 두 줄이 같은 신원이 되어 목표가 겹치고 화면이 한쪽을 삼킨다.
+     */
+    @Test
+    fun `상품유형명이 비어도 대출 여부가 신원을 가른다`() {
+        val cash = holding("005930", 100, 70_000)
+        val credit = holding("005930", 50, 70_000).copy(loanAmt = 1_000_000)
+        assertTrue(cash.productType.isEmpty() && credit.productType.isEmpty(), "상품유형명이 비어 있는 상황을 재현한다")
+        assertNotEquals(cash.key, credit.key)
+
+        val plan = Rebalance.plan(Balance(cash = 0, holdings = listOf(cash, credit)), mapOf(credit.key to 3_000))
+        assertFalse(plan.duplicateKeys, "신원이 갈렸으므로 중복 경고가 뜨면 안 된다")
+        val lines = plan.lines.associateBy { it.key }
+        assertNull(lines.getValue(cash.key).targetBp, "현금분에는 목표가 걸리면 안 된다")
+        assertEquals(3_000, lines.getValue(credit.key).targetBp)
+        assertEquals(3_000, plan.targetSumBp, "목표가 두 줄에 겹치면 6_000 이 된다")
+    }
+
+    /** 대출을 갚아 신용에서 현금으로 바뀌면 신원도 바뀐다 — 저장된 목표는 고아가 된다(문서화된 대가). */
+    @Test
+    fun `대출을 갚으면 신원이 현금분과 같아진다`() {
+        val credit = holding("005930", 50, 70_000).copy(loanAmt = 1_000_000)
+        val repaid = credit.copy(loanAmt = 0, loanDate = "")
+        assertNotEquals(credit.key, repaid.key)
+        assertEquals(holding("005930", 50, 70_000).key, repaid.key)
     }
 }
