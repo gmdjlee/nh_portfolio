@@ -31,6 +31,9 @@ private const val SYNC_DELAY_MS = 250L
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 private val DATE_REGEX = Regex("^\\d{8}$")
 
+/** [DATE_REGEX] 형식(8자리 숫자)이면서 실제 달력에 있는 날짜인지 — 13월처럼 자릿수만 맞는 값을 걸러낸다. */
+private fun String.isCalendarDate(): Boolean = DATE_REGEX.matches(this) && runCatching { LocalDate.parse(this, DATE_FMT) }.isSuccess
+
 sealed interface SyncState {
     data object Idle : SyncState
 
@@ -119,7 +122,9 @@ class MarketData(
                         if (lastDate == null) {
                             BACKFILL_DAYS
                         } else {
-                            minOf(BACKFILL_DAYS, daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS)
+                            // coerceIn 하한 1 — 기기 시계가 과거로 돌아가 lastDate 가 today 보다
+                            // 미래로 남아 있으면 daysBetween 이 음수라 count 가 0 이하로 떨어질 수 있다.
+                            (daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS).coerceIn(1, BACKFILL_DAYS)
                         }
                     loadResult { api.dailyBars(code, count) }
                         .onSuccess { bars -> writeJson(barsFile(code), merge(existing, bars)) }
@@ -153,13 +158,18 @@ class MarketData(
     }
 
     /**
-     * dates·closes 길이가 어긋나거나(부분 기록) dates 중 하나라도 YYYYMMDD 8자리가 아니면
-     * (손상) 없는 파일로 본다 — 그 종목은 조용히 다시 받는다. 여기서 걸러야 손상된 일자가
-     * 병합을 거쳐 파일에 그대로 남는 일 없이 스스로 회복된다.
+     * dates·closes 길이가 어긋나거나(부분 기록), 종가에 0 이하가 섞이거나, dates 중 하나라도
+     * 달력에 없는 날짜(YYYYMMDD 8자리 형식은 맞지만 13월처럼 무효한 값 포함)면(손상) 없는
+     * 파일로 본다 — 그 종목은 조용히 다시 받는다. 여기서 걸러야 손상된 일자·종가가 병합을
+     * 거쳐 파일에 그대로 남는 일 없이 스스로 회복된다.
      */
     private fun readBars(code: String): BarsFile? =
         readJson<BarsFile>(barsFile(code))
-            ?.takeIf { it.dates.size == it.closes.size && it.dates.all { d -> DATE_REGEX.matches(d) } }
+            ?.takeIf {
+                it.dates.size == it.closes.size &&
+                    it.closes.all { c -> c > 0 } &&
+                    it.dates.all { d -> d.isCalendarDate() }
+            }
 
     private fun BarsFile.toBars(): List<Bar> =
         dates.indices.map { i ->

@@ -507,6 +507,122 @@ class MarketDataTest {
         }
 
     @Test
+    fun `일자가 8자리 숫자이지만 달력에 없는(13월) 종목 파일은 없는 것으로 보고 다시 받는다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now().format(FMT)
+            val code = "111111"
+            writeUniverse(f.dir, at = today, codes = listOf(code))
+            writeBars(f.dir, code, dates = listOf("20261332"), closes = listOf(100))
+
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
+
+            f.market.sync().toList()
+
+            assertEquals(1, f.periodRequests(), "13월처럼 자릿수만 맞는 날짜는 없는 파일로 보고 다시 받아야 한다")
+            assertFalse(
+                "20261332" in File(f.dir, "bars/$code.json").readText(),
+                "무효한 일자가 병합을 거쳐 파일에 그대로 남으면 안 된다",
+            )
+            assertEquals(1100, f.market.cachedDays(), "다시 받은 봉만 반영돼야 한다")
+        }
+
+    @Test
+    fun `종가에 0 이하가 섞인 종목 파일은 없는 것으로 보고 다시 받는다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now().format(FMT)
+            val code = "111111"
+            writeUniverse(f.dir, at = today, codes = listOf(code))
+            writeBars(f.dir, code, dates = listOf("20260101", "20260102"), closes = listOf(0, 100))
+
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
+
+            f.market.sync().toList()
+
+            assertEquals(1, f.periodRequests(), "종가에 0 이하가 섞였으면 없는 파일로 보고 다시 받아야 한다")
+            val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
+            assertTrue("\"array_cnt\":\"1100\"" in body, "캐시 없는(손상=없음) 종목이라 최초 백필 건수를 요청해야 한다: $body")
+        }
+
+    @Test
+    fun `저장된 마지막 일자가 미래여도(시계 역행) count 를 1로 낮춰 요청한다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val code = "111111"
+            writeUniverse(f.dir, at = today.format(FMT), codes = listOf(code))
+            writeUpStock(f.dir, code, listOf(today.plusDays(10).format(FMT)))
+
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(1, f.periodRequests())
+            val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
+            assertTrue("\"array_cnt\":\"1\"" in body, "미래로 남은 마지막 일자는 음수 gap 을 1로 낮춰 요청해야 한다: $body")
+            assertEquals(SyncState.Done(0), states.last())
+        }
+
+    @Test
+    fun `권리락 항목은 증분 병합을 거쳐도 살아남고 수정주가 보정에 반영된다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val dates = dateSeq(500, today.minusDays(499))
+            val baseline = writeBaseline(f.dir, dates)
+
+            // EXR: 옛 구간(1~479일)은 원본 5000원, 480일째 권리락(기준가 10000원)으로 2배 분할됐다.
+            // 보정이 살아남으면 전 구간이 10000원으로 평평해져 마지막 날 종가가 자기 200일선과
+            // 같아(above 아님) 진다. 병합이 ex 항목을 잃으면 옛 구간이 5000원에 머물러 마지막 날
+            // 종가(10000)가 자기 200일선(약 5525)보다 높아져(above) 버린다 — 그 차이로 검증한다.
+            val exDate = dates[479]
+            val closesBeforeSync = List(490) { i -> if (i < 479) 5_000 else 10_000 }
+            writeBars(f.dir, "EXR", dates.take(490), closesBeforeSync, ex = mapOf(exDate to 10_000))
+            writeUniverse(f.dir, at = today.format(FMT), codes = baseline + "EXR")
+
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    // 이 테스트의 /period 요청은 EXR 갱신 하나뿐이다(baseline 은 이미 오늘 날짜라
+                    // 건너뛴다). 새로 받는 구간도 권리락 없이 10000원 그대로다.
+                    val input =
+                        Json
+                            .parseToJsonElement((req.body as TextContent).text)
+                            .jsonObject
+                            .getValue("Input_0")
+                            .jsonObject
+                    val count =
+                        input
+                            .getValue("array_cnt")
+                            .jsonPrimitive.content
+                            .toInt()
+                    val edate = input.getValue("edate").jsonPrimitive.content
+                    val end = if (edate.isBlank()) LocalDate.now() else LocalDate.parse(edate, FMT)
+                    val rows =
+                        (0 until count).joinToString(",") { i ->
+                            val d = end.minusDays(i.toLong()).format(FMT)
+                            """{"bsop_date":"$d","stck_prpr":"10000","stck_sdpr":"10000"}"""
+                        }
+                    json("""{"rsp_cd":"00000","rsp_msg":"완료","Output_1":[$rows]}""")
+                }
+            }
+
+            f.market.sync().toList()
+
+            val saved = File(f.dir, "bars/EXR.json").readText()
+            assertTrue("\"$exDate\":10000" in saved, "옛 권리락 항목이 증분 병합 뒤에도 남아 있어야 한다: $saved")
+
+            val signal = assertNotNull(f.market.cached())
+            assertEquals(30.0 / 31.0, signal.breadth, "보정이 살아남았으면 EXR 은 평평해져 above 가 아니어야 한다")
+        }
+
+    @Test
     fun `유니버스 조회가 실패해도 캐시된 목록으로 계속 진행한다`() =
         runTest {
             val f = MdFixture()

@@ -76,6 +76,7 @@ internal fun Band.label(): String =
 
 /**
  * 시장 신호 카드. [heldBp] 는 (유지 비중, 예수금 목표 기준 여부) — [dev.nhportfolio.portfolio.heldBp] 가 만든다.
+ * [actualBp] 는 실제 주식 비중 합(현금 제외, bp) — 계산은 화면(Rebalance)이 하고 카드는 표시만 한다.
  *
  * 캐시가 모자라 [signal] 이 null 이면 판정 대신 확보한 거래일 수([signalDays])를 보여준다.
  * 카드를 누르면(버튼 제외) [onGuide] 로 밴드 지침 화면을 연다 — 그 시점의 밴드([Signal.band])를
@@ -86,6 +87,7 @@ internal fun MarketCard(
     signal: Signal?,
     signalDays: Int,
     heldBp: Pair<Int, Boolean>,
+    actualBp: Int,
     sync: SyncState,
     marketError: String?,
     today: LocalDate,
@@ -141,6 +143,9 @@ internal fun MarketCard(
                 MarketStat("모델 목표", signal.targetBp.bpPct())
                 MarketStat("유지 비중", heldValue.bpPct())
                 MarketStat("밴드", signal.band.label())
+                // fromCashTarget 이 false 면 유지 비중이 곧 실제 비중을 대신한 값이라 이 둘은
+                // 같은 숫자를 보여준다 — 우연이 아니라 의도된 동작이다(사양 §8.1).
+                MarketStat("실제 비중", actualBp.bpPct())
             }
             TextButton(onClick = { onApply(signal.targetBp) }) { Text("이 목표로 맞추기") }
         }

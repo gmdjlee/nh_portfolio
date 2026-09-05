@@ -143,6 +143,8 @@ data class PortfolioUi(
     val signalDays: Int = 0,
     val sync: SyncState = SyncState.Idle,
     val marketError: String? = null,
+    /** 저장된 목표 비중 맵. [heldBp] 호출이 [plan]의 줄 순서에 기대지 않도록 그대로 들고 다닌다. */
+    val targets: Map<String, Int> = emptyMap(),
 )
 
 /**
@@ -213,6 +215,7 @@ class PortfolioViewModel(
                 signalDays = market.signalDays,
                 sync = market.sync,
                 marketError = market.marketError,
+                targets = targets,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
@@ -536,13 +539,14 @@ fun PortfolioScreen(
                             )
                         }
                         SummaryCard(plan, ui.cashAssets, balance.holdings.size) { vm.normalizeTargets() }
-                        // 예수금 목표가 있으면 그 값을, 없으면(사용자가 아직 목표를 안 잡았으면) null 이다 —
-                        // heldBp 는 이 부재를 실제 비중으로 대신하고 그 사실을 카드에 알린다.
-                        val cashTargetBp = plan.lines.last().targetBp
+                        // heldBp 가 예수금 목표 유무를 스스로 가른다 — 목표가 없으면(사용자가 아직
+                        // 안 잡았으면) 실제 비중으로 대신하고 그 사실을 카드에 알린다. targets 를
+                        // 그대로 넘겨야 plan.lines 의 줄 순서(현금 행이 마지막이라는 가정)에 기대지 않는다.
                         MarketCard(
                             signal = ui.signal,
                             signalDays = ui.signalDays,
-                            heldBp = heldBp(cashTargetBp?.let { mapOf(Rebalance.CASH to it) }.orEmpty(), plan),
+                            heldBp = heldBp(ui.targets, plan),
+                            actualBp = plan.lines.filter { it.key != Rebalance.CASH }.sumOf { it.weightBp },
                             sync = ui.sync,
                             marketError = ui.marketError,
                             today = today,

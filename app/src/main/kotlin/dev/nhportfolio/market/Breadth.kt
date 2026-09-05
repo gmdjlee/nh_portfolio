@@ -25,7 +25,7 @@ data class Signal(
     val asOf: String,
 )
 
-/** [heldBp] 는 유지 비중 — 마지막으로 적용한 목표(사양 §2.3). 실제 비중이 아니다. */
+/** 판정 결과. [gapBp] 는 목표 − 유지 비중(bp)이고, [action] 은 그 절댓값이 임계치를 넘었을 때의 방향이다. */
 data class Verdict(
     val action: Action,
     val gapBp: Int,

@@ -31,6 +31,8 @@ import kotlinx.coroutines.test.runTest
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Mac
@@ -43,6 +45,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private const val HOUR = 3_600_000L
+private val FMT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 
 private fun MockRequestHandleScope.json(
     body: String,
@@ -176,6 +179,13 @@ private const val DAILY_BARS_BLANK_DATE_BODY = """
 {"rsp_cd":"00000","rsp_msg":"완료",
  "Output_1":[{"bsop_date":"","stck_prpr":"999","stck_sdpr":"999"},
              {"bsop_date":" 20260102","stck_prpr":"70000","stck_sdpr":"69000"}]}
+"""
+
+/** 한 행의 bsop_date 는 8자리 숫자이지만 13월이라 달력에 없다 — 빈 값과 같이 버려져야 한다. */
+private const val DAILY_BARS_INVALID_CALENDAR_DATE_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20261332","stck_prpr":"999","stck_sdpr":"999"},
+             {"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000"}]}
 """
 
 /** 서버가 edate 를 무시하고 oldest 를 역행시킨다(1페이지 20260108 → 2페이지 20260109) — 가드 테스트용. */
@@ -947,6 +957,31 @@ class NhApiTest {
         }
 
     @Test
+    fun `dailyBars 는 매번 진전이 있어도 페이지 상한에서 멈춘다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            var page = 0
+            val start = LocalDate.of(2026, 1, 31)
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    // 매 페이지 새 날짜를 하나씩만 준다 — count(1100) 에는 한참 못 미치지만
+                    // 진전은 계속 있으므로 page cap 이 없으면 이 루프는 끝나지 않는다.
+                    val d = start.minusDays(page.toLong()).format(FMT)
+                    page++
+                    json("""{"rsp_cd":"00000","rsp_msg":"완료","Output_1":[{"bsop_date":"$d","stck_prpr":"100","stck_sdpr":"100"}]}""")
+                }
+            }
+
+            val bars = f.api.dailyBars("005930", count = 1_100)
+
+            assertEquals(20, bars.size, "MAX_PAGES(20) 에서 멈춰야 한다")
+            assertEquals(20, f.requests.count { it.url.encodedPath.endsWith("/period") })
+        }
+
+    @Test
     fun `dailyBars 는 bsop_date 가 빈 문자열인 행을 버리고 죽지 않는다`() =
         runTest {
             val f = ApiFixture()
@@ -959,6 +994,20 @@ class NhApiTest {
 
             assertEquals(listOf("20260102"), bars.map { it.date }, "빈 bsop_date 행은 빠지고 공백 채움 유효 행만 남아야 한다")
             assertEquals(1, f.requests.count { it.url.encodedPath.endsWith("/period") }, "count 를 채웠으면 더 부르지 않는다")
+        }
+
+    @Test
+    fun `dailyBars 는 bsop_date 가 자릿수만 맞고 달력에 없으면 그 행을 버린다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_INVALID_CALENDAR_DATE_BODY)
+            }
+
+            val bars = f.api.dailyBars("005930", count = 1)
+
+            assertEquals(listOf("20260102"), bars.map { it.date }, "13월처럼 자릿수만 맞는 날짜는 빈 값과 같이 버려져야 한다")
         }
 
     @Test
