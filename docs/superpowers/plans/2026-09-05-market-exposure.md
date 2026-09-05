@@ -68,7 +68,7 @@
 |---|---|---|
 | `market/Breadth.kt` | 순수 계산. 종가 배열 → 수정주가 보정 → 시장폭 → 백분위 → 평활 → 앙상블 → 목표·밴드·판정. 라이브러리 import 0개 | 1 |
 | `api/NhApi.kt` | `etfComponents()`, `dailyBars()` 두 메서드와 private DTO 추가 | 2 |
-| `market/MarketData.kt` | 유니버스·종가 캐시 파일 하나, 동기화 오케스트레이션, 진행률, 재개 | 3 |
+| `market/MarketData.kt` | 유니버스·종목별 종가 캐시 파일, 동기화 오케스트레이션, 진행률, 재개 | 3 |
 | `market/MarketCard.kt` | 포트폴리오 화면 상단 카드 | 4 |
 | `portfolio/PortfolioScreen.kt` | 카드 배치, `applyMarketTarget()` | 4 |
 | `market/BandGuide.kt` | 밴드별 지침 정적 데이터와 지침 화면 | 5 |
@@ -257,7 +257,8 @@ suspend fun NhApi.dailyBars(code: String, count: Int, endDate: String = ""): Lis
 sealed interface SyncState {
     data object Idle : SyncState
     data class Running(val done: Int, val total: Int) : SyncState
-    data class Failed(val message: String) : SyncState
+    /** 종목별 실패는 세어서 넘긴다. 치명 오류(유니버스 조회 실패 + 캐시 없음)는 예외로 전파한다. */
+    data class Done(val failed: Int) : SyncState
 }
 
 class MarketData(private val api: NhApi, private val dir: File) {
@@ -272,15 +273,15 @@ class MarketData(private val api: NhApi, private val dir: File) {
 
 **구현 메모:**
 
-- **저장은 `dir/closes.json` 파일 하나다.** DataStore 에 넣지 않는다. `edit {}` 한 번이
-  파일 전체를 다시 쓰기 때문에, 1 MB 짜리 배열을 같이 두면 토큰 재발급 한 번이 매번 그
-  전체를 다시 쓰게 된다(사양 §5.3).
+- **저장은 종목별 파일이다** (Ruling 8, 2026-09-05): `dir/universe.json` =
+  `{"at":"YYYYMMDD","codes":[...]}`, `dir/bars/<code>.json` =
+  `{"dates":[...],"closes":[...],"ex":{"YYYYMMDD":기준가}}` (날짜 오름차순 병렬 배열, `ex` 는
+  권리락 날만). DataStore 에 넣지 않는다 — `edit {}` 한 번이 파일 전체를 다시 쓴다(사양 §5.3).
+  파일 하나에 모으지도 않는다 — 백필 중 종목마다 수 MB 를 다시 쓰거나 끝에 한 번만 써서
+  프로세스가 죽으면 전부 잃는다. 종목별 파일은 재개·부분 실패·손상 격리가 저절로 된다.
 - **봉인하지 않는다.** 공개 시장 데이터라 지킬 비밀이 없고, DEK 에 묶으면 저장 경로만
   좁아진다.
-- 형식은 `{"asOf":"YYYYMMDD","universeAt":"YYYYMMDD","universe":[...],"dates":[...],"closes":{"005930":[...]}}`
-  로 충분하다. 종가는 `Int` 배열이며 `dates` 와 길이가 같다. 유니버스도 같은 파일에 둔다 —
-  파일을 둘로 나누면 한쪽만 깨졌을 때의 처리가 하나 더 생긴다.
-- **"마지막 계산 시각" 을 따로 저장하지 않는다.** `asOf`(마지막 거래일)가 그 역할을 한다.
+- **"마지막 계산 시각" 을 따로 저장하지 않는다.** `Signal.asOf`(마지막 거래일)가 그 역할을 한다.
   화면의 "7일이 지나면 갱신 권고" 도 벽시계가 아니라 이 값을 기준으로 삼는다 — 주 1회
   신호에서 의미 있는 경과는 "언제 계산했는가" 가 아니라 "며칠 전 장까지 반영됐는가" 다.
 - **쓰기는 임시 파일에 하고 `renameTo` 로 바꾼다.** 200회 호출 도중 앱이 죽으면 반쯤 쓰인
@@ -296,8 +297,8 @@ class MarketData(private val api: NhApi, private val dir: File) {
   떠나면 취소되며, 다음에 이어받는다.
 - 거래일 달력은 **유니버스 전체 일자의 합집합**이고, 종목마다 없는 날은 직전 값으로 채운다
   (사양 §6.3). 앞쪽에 값이 없는 구간(상장 전)은 채우지 않고 미정의로 둔다.
-- 유니버스는 `universeAt` 이 **90일 이상** 지났을 때만 다시 받는다. 실패하면 캐시된
-  목록을 그대로 쓴다.
+- 유니버스는 `universe.json` 의 `at` 이 **90일 이상** 지났을 때만 다시 받는다. 실패하면 캐시된
+  목록을 그대로 쓰고, 캐시도 없으면 예외를 전파한다. 갱신 시 빠진 종목의 파일은 지운다.
 
 **Steps:**
 
