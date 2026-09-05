@@ -142,6 +142,8 @@ data class PortfolioUi(
     /** 확보한 거래일 수. [signal] 이 null 일 때 "거래일 N" 표시에 쓴다. */
     val signalDays: Int = 0,
     val sync: SyncState = SyncState.Idle,
+    /** [sync] 가 Running 으로 바뀐 시각(epoch ms). 카드가 ETA 를 계산하는 기준이다. */
+    val syncStartedAt: Long = 0L,
     val marketError: String? = null,
     /** 저장된 목표 비중 맵. [heldBp] 호출이 [plan]의 줄 순서에 기대지 않도록 그대로 들고 다닌다. */
     val targets: Map<String, Int> = emptyMap(),
@@ -155,6 +157,7 @@ internal data class MarketUi(
     val signal: Signal? = null,
     val signalDays: Int = 0,
     val sync: SyncState = SyncState.Idle,
+    val syncStartedAt: Long = 0L,
     val marketError: String? = null,
 )
 
@@ -214,6 +217,7 @@ class PortfolioViewModel(
                 signal = market.signal,
                 signalDays = market.signalDays,
                 sync = market.sync,
+                syncStartedAt = market.syncStartedAt,
                 marketError = market.marketError,
                 targets = targets,
             )
@@ -306,6 +310,7 @@ class PortfolioViewModel(
         if (syncJob?.isActive == true) return
         syncJob =
             viewModelScope.launch {
+                marketUi.value = marketUi.value.copy(syncStartedAt = System.currentTimeMillis())
                 try {
                     withContext(Dispatchers.IO) {
                         market.sync().collect { state -> marketUi.value = marketUi.value.copy(sync = state, marketError = null) }
@@ -548,6 +553,7 @@ fun PortfolioScreen(
                             heldBp = heldBp(ui.targets, plan),
                             actualBp = plan.lines.filter { it.key != Rebalance.CASH }.sumOf { it.weightBp },
                             sync = ui.sync,
+                            syncStartedAt = ui.syncStartedAt,
                             marketError = ui.marketError,
                             today = today,
                             onSync = vm::syncMarket,

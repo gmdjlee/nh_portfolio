@@ -674,7 +674,9 @@ class NhApiTest {
 
             val before = currentTime
             assertEquals(1, f.api.accounts().size)
-            assertEquals(900, currentTime - before, "지연은 300+600=900ms 여야 한다")
+            // 300+600 은 최소 보장이다 — 재시도도 client.post 라 전역 요청 게이트(250ms, C2)를 거치므로
+            // 실제 지연은 이보다 길 수 있다. 게이트가 토큰을 건드리지 않는지는 tokenCalls 로 따로 잡는다.
+            assertTrue(currentTime - before >= 900, "지연은 최소 300+600=900ms 여야 한다: ${currentTime - before}")
             assertEquals(0, f.tokenCalls)
             assertEquals(3, f.requests.size)
         }
@@ -1068,5 +1070,62 @@ class NhApiTest {
             val e = assertFailsWith<NhException> { f.api.dailyBars("005930", count = 5) }
             assertEquals("40010", e.code)
             assertEquals("종목코드 항목을 입력하세요.", e.message)
+        }
+
+    @Test
+    fun `dailyBars 는 필요한 만큼 모이면 cts 가 남아 있어도 더 받지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            // 서버가 array_cnt(remaining=7) 를 무시하고 3봉씩, cts_flag=Y·매번 새 cts 로 끝없이 준다고 가정한다 —
+            // enough() 가 없으면 cts 가 절대 멈추지 않아(반복도 안 되고 항상 Y) MAX_PAGES 까지 돈다.
+            var page = 0
+            val start = LocalDate.of(2026, 3, 31)
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    val base = page * 3
+                    val rows =
+                        (0 until 3).joinToString(",") { i ->
+                            val d = start.minusDays((base + i).toLong()).format(FMT)
+                            """{"bsop_date":"$d","stck_prpr":"${100 - base - i}","stck_sdpr":"${100 - base - i}"}"""
+                        }
+                    page++
+                    json(
+                        """{"rsp_cd":"00000","rsp_msg":"완료","Output_1":[$rows]}""",
+                        extra = headersOf("cts" to listOf("P$page"), "cts_flag" to listOf("Y")),
+                    )
+                }
+            }
+
+            val bars = f.api.dailyBars("005930", count = 7)
+
+            assertEquals(
+                3,
+                f.requests.count { it.url.encodedPath.endsWith("/period") },
+                "9봉이 모여 7건을 채운 3번째 페이지에서 cts 를 더 따라가면 안 된다",
+            )
+            assertEquals(
+                listOf("20260325", "20260326", "20260327", "20260328", "20260329", "20260330", "20260331"),
+                bars.map { it.date },
+            )
+        }
+
+    @Test
+    fun `요청 사이에는 최소 250ms 간격을 앱 전체에서 지킨다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(ACCOUNTS_BODY) }
+
+            f.api.accounts() // 토큰 발급 + 첫 gate 요청 — 아직 예약이 없으니 대기 없이 통과한다
+            val afterFirst = currentTime
+            f.api.accounts() // 토큰은 캐시되니 gate 요청 하나뿐 — 첫 요청 슬롯으로부터 250ms 는 떨어져야 한다
+
+            assertTrue(
+                currentTime - afterFirst >= 250,
+                "두 번째 요청은 첫 요청 슬롯 뒤 250ms 이상 지나야 한다: ${currentTime - afterFirst}ms",
+            )
         }
 }

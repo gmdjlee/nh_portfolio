@@ -5,6 +5,7 @@ import dev.nhportfolio.market.Breadth
 import dev.nhportfolio.market.Signal
 import dev.nhportfolio.market.SyncState
 import dev.nhportfolio.market.Verdict
+import dev.nhportfolio.market.syncProgressText
 import dev.nhportfolio.market.verdictText
 import dev.nhportfolio.portfolio.MarketUi
 import dev.nhportfolio.portfolio.Rebalance
@@ -171,5 +172,28 @@ class MarketTargetTest {
 
         assertTrue(detail.endsWith("기준 2026-01-01."), detail)
         assertFalse(detail.contains("경과"), detail)
+    }
+
+    // ---- syncProgressText ----
+
+    @Test
+    fun `진행 표본이 5 미만이면 ETA 없이 진행 개수만 보여준다`() {
+        val text = syncProgressText(SyncState.Running(4, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 4/200 종목", text)
+    }
+
+    @Test
+    fun `200개 중 10개를 60초 만에 끝냈으면 약 19분 남음을 보여준다`() {
+        val text = syncProgressText(SyncState.Running(10, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 10/200 종목 · 약 19분 남음", text)
+    }
+
+    @Test
+    fun `거의 다 됐으면 반올림 대신 1분 미만이라고 보여준다`() {
+        val text = syncProgressText(SyncState.Running(199, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 199/200 종목 · 1분 미만", text)
     }
 }

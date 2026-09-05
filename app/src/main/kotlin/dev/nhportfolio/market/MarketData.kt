@@ -3,15 +3,19 @@ package dev.nhportfolio.market
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.api.NhException
 import dev.nhportfolio.api.loadResult
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** 유니버스 조달 경로 — 코스피200 ETF 구성종목. krstock 에 랭킹 API가 없어 이 ETF 를 대신 쓴다. */
 private const val KODEX200 = "069500"
@@ -25,8 +29,9 @@ private const val UNIVERSE_MAX_AGE_DAYS = 90L
 /** 재개 시 여유분. 달력일이 거래일보다 항상 많으니 이만큼 더 받아도 병합이 중복만 정리하고 빈틈은 안 남는다. */
 private const val GAP_MARGIN_DAYS = 5
 
-/** 종목 사이 호출 간격 — NH 초당 4건 제한(0.25초)을 지킨다. */
-private const val SYNC_DELAY_MS = 250L
+/** 동시에 갱신할 종목 수. 요청 간격은 [NhApi] 의 전역 게이트가 지키므로 여기서는 동시
+ *  개수만 제한하면 된다(합산 속도는 여전히 초당 요청 제한 아래로 묶인다). */
+private const val SYNC_LANES = 4
 
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 private val DATE_REGEX = Regex("^\\d{8}$")
@@ -82,9 +87,14 @@ class MarketData(
     /** 확보한 거래일 수. 신호가 null 일 때 "거래일 N, 최소 약 500일" 표시에 쓴다. */
     fun cachedDays(): Int = loadCalendar().first.size
 
-    /** 유니버스와 종가를 갱신한다. 진행률을 흘리고, 끝나면 새 신호를 돌려준다(콜드 플로우). */
+    /**
+     * 유니버스와 종가를 갱신한다. 진행률을 흘리고, 끝나면 새 신호를 돌려준다(콜드 플로우).
+     * 종목마다 [SYNC_LANES] 개까지 동시에 처리한다 — cts/edate 페이징이 줄어든 데다(NhApi.dailyBars)
+     * 요청 간격도 전역 게이트 하나로 묶였으니, 남은 병목은 종목 수만큼의 왕복 지연뿐이다.
+     * 수집자가 취소되면(화면 이탈) 구조적 동시성으로 아직 도는 종목 코루틴도 함께 취소된다.
+     */
     fun sync(): Flow<SyncState> =
-        flow {
+        channelFlow {
             val today = LocalDate.now().format(DATE_FMT)
             val cachedUniverse = readJson<UniverseFile>(universeFile())
 
@@ -111,30 +121,37 @@ class MarketData(
                     cachedUniverse.codes
                 }
 
-            emit(SyncState.Running(0, codes.size))
+            send(SyncState.Running(0, codes.size))
 
-            var failed = 0
-            codes.forEachIndexed { index, code ->
-                val existing = readBars(code)
-                val lastDate = existing?.dates?.lastOrNull()
-                if (lastDate != today) {
-                    val count =
-                        if (lastDate == null) {
-                            BACKFILL_DAYS
-                        } else {
-                            // coerceIn 하한 1 — 기기 시계가 과거로 돌아가 lastDate 가 today 보다
-                            // 미래로 남아 있으면 daysBetween 이 음수라 count 가 0 이하로 떨어질 수 있다.
-                            (daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS).coerceIn(1, BACKFILL_DAYS)
+            val done = AtomicInteger(0)
+            val failed = AtomicInteger(0)
+            val gate = Semaphore(SYNC_LANES)
+            coroutineScope {
+                codes.forEach { code ->
+                    launch {
+                        gate.withPermit {
+                            val existing = readBars(code)
+                            val lastDate = existing?.dates?.lastOrNull()
+                            if (lastDate != today) {
+                                val count =
+                                    if (lastDate == null) {
+                                        BACKFILL_DAYS
+                                    } else {
+                                        // coerceIn 하한 1 — 기기 시계가 과거로 돌아가 lastDate 가 today 보다
+                                        // 미래로 남아 있으면 daysBetween 이 음수라 count 가 0 이하로 떨어질 수 있다.
+                                        (daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS).coerceIn(1, BACKFILL_DAYS)
+                                    }
+                                loadResult { api.dailyBars(code, count) }
+                                    .onSuccess { bars -> writeJson(barsFile(code), merge(existing, bars)) }
+                                    .onFailure { failed.incrementAndGet() }
+                            }
+                            send(SyncState.Running(done.incrementAndGet(), codes.size))
                         }
-                    loadResult { api.dailyBars(code, count) }
-                        .onSuccess { bars -> writeJson(barsFile(code), merge(existing, bars)) }
-                        .onFailure { failed++ }
+                    }
                 }
-                emit(SyncState.Running(index + 1, codes.size))
-                if (index != codes.lastIndex) delay(SYNC_DELAY_MS)
             }
 
-            emit(SyncState.Done(failed))
+            send(SyncState.Done(failed.get()))
         }
 
     private fun universeFile() = File(dir, "universe.json")
