@@ -52,7 +52,9 @@ object Breadth {
 
     /**
      * 수정주가 보정. 최신에서 과거 방향으로 훑으며, 액면분할·병합·권리락이 있었던 날의
-     * 기준가와 전일 종가의 비율이 2% 를 넘게 벌어질 때만 그 이전 종가에 누적 곱한다.
+     * 기준가와 전일 **원본** 종가의 비율이 2% 를 넘게 벌어질 때만 그 이전 종가에 누적
+     * 곱한다. 분모를 원본 종가로 고정해야 한다 — 이미 보정된(뒤쪽 권리락의 배수가 곱해진)
+     * 값을 분모로 쓰면 분할이 두 번 이상 겹칠 때 계수가 어긋나 보정이 조용히 건너뛰어진다.
      * 응답이 이미 수정주가면 비율이 1 에 붙어 저절로 통과한다.
      */
     fun adjust(bars: List<Bar>): IntArray {
@@ -60,7 +62,7 @@ object Breadth {
         for (i in bars.lastIndex downTo 1) {
             val bar = bars[i]
             if (!bar.exRight) continue
-            val factor = bar.refPrice.toDouble() / adjusted[i - 1]
+            val factor = bar.refPrice.toDouble() / bars[i - 1].close
             if (abs(factor - 1.0) > 0.02) {
                 for (j in 0 until i) adjusted[j] *= factor
             }
@@ -91,13 +93,12 @@ object Breadth {
         val pctile = pctileByMa.getValue(MA_DISPLAY).last()
         if (pctile.isNaN()) return null
 
-        // 구성마다 평활(최근 sm개 백분위 평균)이 아직 다 정의되지 않았을 수 있다 — 정의된
-        // 구성만으로 앙상블한다. 하나도 없으면 목표를 낼 근거가 없어 null 이다.
-        val rawSmooths =
-            MA_LENGTHS
-                .flatMap { ma -> SM_LENGTHS.map { sm -> smoothLast(pctileByMa.getValue(ma), sm) } }
-                .filter { !it.isNaN() }
-        if (rawSmooths.isEmpty()) return null
+        // 목표는 9구성 전부의 평균이다(사양 §2 의 5) — 구성이 하나라도 아직 평활되지
+        // 않았으면(창 워밍업) 부분 앙상블을 대신 내지 않고 null 이다. 원 코드는 워밍업
+        // 구간을 중립값으로 채워 늘 9개를 채우는데, 이 채움을 일부러 옮기지 않았으므로
+        // 대신 9개가 다 찰 때까지 기다린다.
+        val rawSmooths = MA_LENGTHS.flatMap { ma -> SM_LENGTHS.map { sm -> smoothLast(pctileByMa.getValue(ma), sm) } }
+        if (rawSmooths.any { it.isNaN() }) return null
 
         val targetBp = quantize(rawSmooths)
         return Signal(
@@ -105,7 +106,9 @@ object Breadth {
             band = bandOf(targetBp),
             breadth = breadth,
             pctile = pctile,
-            window = definedCount(breadthByMa.getValue(MA_DISPLAY), PCT_WIN),
+            // 세 이동평균 길이 중 창이 가장 늦게 차는 쪽이 병목이다 — 200일선만 보면
+            // 250일선이 아직 부분 창인데도 756/756 으로 보여 다 찬 것처럼 속일 수 있다.
+            window = MA_LENGTHS.minOf { definedCount(breadthByMa.getValue(it), PCT_WIN) },
             asOf = dates.last(),
         )
     }

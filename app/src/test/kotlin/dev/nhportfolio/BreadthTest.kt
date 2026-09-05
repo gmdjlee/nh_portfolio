@@ -7,8 +7,10 @@ import dev.nhportfolio.market.Breadth
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private fun bar(
     date: String,
@@ -87,11 +89,30 @@ class BreadthTest {
         assertEquals(listOf(10_000, 9_700), Breadth.adjust(bars).toList())
     }
 
+    /**
+     * 분모는 항상 그 시점의 **원본** 전일 종가여야 한다. 뒤쪽(더 최근) 분할이 이미 곱해
+     * 넣은 값을 분모로 쓰면, 앞쪽(더 과거) 분할의 계수가 1.0 근처로 뭉개져 2% 문턱에
+     * 걸려 보정이 조용히 건너뛰어진다 — 두 번 겹친 2:1 분할은 이 결함을 드러낸다.
+     */
+    @Test
+    fun `2대1 분할이 두 번 겹쳐도 전부 같은 값으로 보정된다`() {
+        val bars =
+            listOf(
+                bar("20260101", close = 40_000),
+                bar("20260102", close = 40_000),
+                bar("20260105", close = 20_000, refPrice = 20_000, exRight = true),
+                bar("20260106", close = 20_000),
+                bar("20260107", close = 10_000, refPrice = 10_000, exRight = true),
+                bar("20260108", close = 10_000),
+            )
+        assertEquals(List(6) { 10_000 }, Breadth.adjust(bars).toList())
+    }
+
     // ---- 이동평균 ----
 
     @Test
     fun `유효 관측이 200일선 최소치 미만인 종목은 그 날 분모에서 빠진다`() {
-        val days = 420
+        val days = 500 // 9구성이 전부 정의되는 최소치(497)보다 넉넉히 위 — signal 이 null 이면 비교가 안 된다
         val clean = universe(stockCount = 30, days = days, seed = 7)
         // 마지막 50일만 값이 있고 나머지는 상장 전(0) — 200일 창의 유효 관측이 150(=floor(200*.75)) 미만이다.
         // 값을 우상향시켜 두어, 잘못 끼어들면(above 로 잡히면) 비율이 바뀌도록 한다.
@@ -114,27 +135,36 @@ class BreadthTest {
 
     // ---- 백분위 (signal 을 통한 window 경계) ----
 
+    /**
+     * 9구성 중 가장 늦게 차는 것은 (ma=250, sm=60) 이다 — 250일선은 min_periods=187 이라
+     * 186일째(0-idx)부터 시장폭이 정의되고, 백분위는 관측 252개가 더 쌓인 437일째부터,
+     * sm=60 평활은 그로부터 59일 더 지난 496일째부터 정의된다. 즉 총 497일이면 9구성이
+     * 전부 차고, 496일이면 하나(250,60)가 모자라 신호 전체가 null 이다. 이 경계는
+     * `Breadth` 의 실제 상수(이동평균 150/200/250, 평활 20/40/60)에서 유도한 값이며,
+     * 아래 assertNotNull/assertNull 로 양쪽을 직접 확인한다.
+     */
     @Test
-    fun `MA200 유효 관측이 251개면 null 이고 252개면 window 가 252 다`() {
-        // MA200 의 min_periods 는 150 이므로 시장폭은 149일째(0-idx)부터 정의된다.
-        // 400일 -> 251개 관측, 401일 -> 252개 관측.
-        val stocks = universe(stockCount = 30, days = 401, seed = 21)
-        val d251 = stocks.mapValues { it.value.copyOfRange(0, 400) }
-
-        assertNull(Breadth.signal(d251, labels(400)))
-        val signal = assertNotNull(Breadth.signal(stocks, labels(401)))
-        assertEquals(252, signal.window)
+    fun `9구성이 전부 정의되는 최소 일수에서만 signal 이 non-null 이다`() {
+        val stocks = universe(stockCount = 30, days = 497, seed = 21)
+        assertNull(Breadth.signal(stocks.mapValues { it.value.copyOfRange(0, 496) }, labels(496)))
+        assertNotNull(Breadth.signal(stocks, labels(497)))
     }
 
     @Test
     fun `관측 1000개면 최근 756개만 쓰고 window 가 756 이다`() {
-        val days = 150 + 1_000 // MA200 워밍업 149일 + 관측 1000개
+        val days = 150 + 1_000 // MA200 워밍업 149일 + 관측 1000개 — 250일선도 넉넉히 756 을 채운다
         val stocks = universe(stockCount = 30, days = days, seed = 22)
         val signal = assertNotNull(Breadth.signal(stocks, labels(days)))
         assertEquals(756, signal.window)
     }
 
     // ---- 백분위 (pctRank 직접) ----
+
+    @Test
+    fun `pctRank 는 관측 251개면 미정의(NaN)고 252개면 값이 나온다`() {
+        assertTrue(Breadth.pctRank(DoubleArray(251) { it.toDouble() }).last().isNaN())
+        assertFalse(Breadth.pctRank(DoubleArray(252) { it.toDouble() }).last().isNaN())
+    }
 
     @Test
     fun `riskmodel_functions 의 예시 - 창 5 를 걸면 마지막 값은 0점2 다`() {
