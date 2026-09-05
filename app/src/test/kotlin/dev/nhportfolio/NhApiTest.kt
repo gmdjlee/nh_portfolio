@@ -171,6 +171,26 @@ private const val PERIOD_PAGE_3_BODY = """
              {"bsop_date":"20260105","stck_prpr":"105","stck_sdpr":"105"}]}
 """
 
+/** 한 행은 bsop_date 가 빈 문자열이고, 다른 한 행은 앞에 공백이 있지만 트림하면 유효하다. */
+private const val DAILY_BARS_BLANK_DATE_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"","stck_prpr":"999","stck_sdpr":"999"},
+             {"bsop_date":" 20260102","stck_prpr":"70000","stck_sdpr":"69000"}]}
+"""
+
+/** 서버가 edate 를 무시하고 oldest 를 역행시킨다(1페이지 20260108 → 2페이지 20260109) — 가드 테스트용. */
+private const val PERIOD_REGRESS_A_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260110","stck_prpr":"110","stck_sdpr":"110"},
+             {"bsop_date":"20260108","stck_prpr":"108","stck_sdpr":"108"}]}
+"""
+
+private const val PERIOD_REGRESS_B_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260112","stck_prpr":"112","stck_sdpr":"112"},
+             {"bsop_date":"20260109","stck_prpr":"109","stck_sdpr":"109"}]}
+"""
+
 private class ApiFixture {
     private val dir: File = Files.createTempDirectory("api").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 7 }, "HmacSHA256")
@@ -924,6 +944,47 @@ class NhApiTest {
 
             assertEquals(listOf("20260101", "20260102"), bars.map { it.date })
             assertEquals(2, f.requests.count { it.url.encodedPath.endsWith("/period") }, "진전이 없으면 멈춰야 한다")
+        }
+
+    @Test
+    fun `dailyBars 는 bsop_date 가 빈 문자열인 행을 버리고 죽지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_BLANK_DATE_BODY)
+            }
+
+            val bars = f.api.dailyBars("005930", count = 1)
+
+            assertEquals(listOf("20260102"), bars.map { it.date }, "빈 bsop_date 행은 빠지고 공백 채움 유효 행만 남아야 한다")
+            assertEquals(1, f.requests.count { it.url.encodedPath.endsWith("/period") }, "count 를 채웠으면 더 부르지 않는다")
+        }
+
+    @Test
+    fun `dailyBars 는 오래된 일자가 뒤로 가지 않으면 두 번째 호출에서 멈춘다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            var page = 0
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    when (page++) {
+                        0 -> json(PERIOD_REGRESS_A_BODY)
+                        else -> json(PERIOD_REGRESS_B_BODY)
+                    }
+                }
+            }
+
+            f.api.dailyBars("005930", count = 10)
+
+            assertEquals(
+                2,
+                f.requests.count { it.url.encodedPath.endsWith("/period") },
+                "oldest 가 뒤로 가지 않으면(역행 포함) 세 번째 호출을 하면 안 된다",
+            )
         }
 
     @Test

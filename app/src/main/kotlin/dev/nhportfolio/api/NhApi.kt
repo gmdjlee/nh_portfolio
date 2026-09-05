@@ -214,8 +214,8 @@ class NhApi(
         var edate = endDate
         var oldestSeen: String? = null
         // array_cnt 상한이 명세에 없다 — 서버가 cts 없이 자르면 가장 오래된 일자의 전날을 edate 로
-        // 넣어 수동으로 이어 받는다. 요청 건수에 닿거나(count) 빈 응답이거나, 오래된 일자가 그대로면
-        // (서버가 진전 없이 같은 것만 되돌리는 경우) 멈춘다 — 마지막 조건이 무한 루프를 막는다.
+        // 넣어 수동으로 이어 받는다. 요청 건수에 닿거나(count) 빈 응답이거나, 오래된 일자가 뒤로
+        // 가지 않으면(진전 없음 — 반복은 물론 서버가 역행하는 경우까지) 멈춘다 — 후자가 무한 루프를 막는다.
         while (collected.size < count) {
             val remaining = count - collected.size
             val batch =
@@ -238,11 +238,15 @@ class NhApi(
                 )
             val first = batch.first()
             val dtos = first.expect(first.output1, emptyList()) + batch.drop(1).flatMap { it.output1.orEmpty() }
-            for (dto in dtos) dto.toBar()?.let { collected[it.date] = it }
+            // bsop_date 가 8자리 숫자가 아닌 행은 toBar() 가 통째로 버린다 — oldest 는 살아남은
+            // 행에서만 구해야 dayBefore() 에 빈 문자열이 들어가는 일이 없다.
+            val bars = dtos.mapNotNull { it.toBar() }
+            for (bar in bars) collected[bar.date] = bar
 
-            // 빈 응답이거나(oldest == null) 가장 오래된 일자가 그대로면(진전 없음) 멈춘다 — 후자가 무한 루프를 막는다.
-            val oldest = dtos.minOfOrNull { it.date.trim() }
-            if (oldest == null || oldest == oldestSeen) break
+            // 빈 응답이거나(oldest == null), 가장 오래된 일자가 뒤로 가지 않으면 멈춘다 — 서버가
+            // 같은 값을 반복하거나(진전 없음) edate 를 무시하고 역행해도 여기서 끊는다.
+            val oldest = bars.minOfOrNull { it.date }
+            if (oldest == null || (oldestSeen != null && oldest >= oldestSeen)) break
             oldestSeen = oldest
             edate = dayBefore(oldest)
         }
@@ -587,9 +591,11 @@ private val FCAM_EX_RIGHT_CODES = setOf("01", "02", "03", "04")
 /** 권리락·권배락·권리중간배당락·권리분기배당락 */
 private val FLNG_EX_RIGHT_CODES = setOf("01", "04", "06", "07")
 
-/** [date](YYYYMMDD) 의 전날. dailyBars 의 수동 페이징 전용. */
+/** [date](YYYYMMDD, 8자리 숫자로 검증된 값만 들어온다) 의 전날. dailyBars 의 수동 페이징 전용. */
 private fun dayBefore(date: String): String =
     LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE).minusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)
+
+private val DATE_REGEX = Regex("^\\d{8}$")
 
 /** 일봉 한 줄. [Bar.exRight] 판정을 이 파일 안에서 끝낸다 — NH 코드값을 아는 곳은 여기뿐이다. */
 @Serializable
@@ -600,13 +606,16 @@ private data class BarDto(
     @SerialName("flng_cls_code") val flngCode: String = "",
     @SerialName("fcam_mod_cls_code") val fcamCode: String = "",
 ) {
-    /** 종가가 양의 정수가 아니면 그 날은 버린다. 기준가가 무효면 0 으로 두고 exRight 도 강제로 false 다 —
-     *  0 인 기준가가 수정주가 보정([dev.nhportfolio.market.Breadth.adjust])으로 새면 안 된다. */
+    /** 일자가 8자리 숫자가 아니거나 종가가 양의 정수가 아니면 그 날은 버린다(dayBefore() 가 빈
+     *  문자열을 파싱하다 죽는 일을 막는다). 기준가가 무효면 0 으로 두고 exRight 도 강제로
+     *  false 다 — 0 인 기준가가 수정주가 보정([dev.nhportfolio.market.Breadth.adjust])으로
+     *  새면 안 된다. */
     fun toBar(): Bar? {
+        val dateValue = date.trim().takeIf { DATE_REGEX.matches(it) } ?: return null
         val closeValue = close.trim().toIntOrNull()?.takeIf { it > 0 } ?: return null
         val refValue = refPrice.trim().toIntOrNull()?.takeIf { it > 0 }
         return Bar(
-            date = date.trim(),
+            date = dateValue,
             close = closeValue,
             refPrice = refValue ?: 0,
             exRight = refValue != null && (fcamCode.trim() in FCAM_EX_RIGHT_CODES || flngCode.trim() in FLNG_EX_RIGHT_CODES),
