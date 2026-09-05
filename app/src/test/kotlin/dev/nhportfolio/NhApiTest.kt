@@ -75,15 +75,18 @@ private const val BALANCE_BODY = """
               "phs_pr":68000,"now_pr":70000,"eal_amt":700000,"pft_rt":2.94}]}
 """
 
-/** 같은 종목코드가 신용/융자 매수분으로 온 경우 — pdt_tp_nm·lon_bnc_amt·lon_byn_dt 에 더해
- *  신원을 가를 후보인 tp_cd_nm·itg_bnc_tp_cd 도 실려 있다. */
+/**
+ * 같은 종목코드가 신용/융자 매수분으로 온 경우 — pdt_tp_nm·lon_bnc_amt·lon_byn_dt 에 더해
+ * 신원을 가르는 tp_cd_nm 도 실려 있다. 둘 다 NH 고정폭 필드라 뒤 공백이 섞여 올 수 있어
+ * 여기서부터 채워 넣어 트리밍까지 함께 확인한다.
+ */
 private const val BALANCE_CREDIT_BODY = """
 {"rsp_cd":"00000","rsp_msg":"조회가 완료되었습니다.",
  "Output_0":{"dca":111,"nxt2_dd_dca":500000,"tot_eal_amt":350000},
  "Output_1":[{"iem_cd":"005930","iem_nm":"삼성전자","itg_bnc_qty":5.0,"rsdl_qty":5.0,
               "phs_pr":68000,"now_pr":70000,"eal_amt":350000,"pft_rt":2.94,
-              "pdt_tp_nm":"신용융자","lon_bnc_amt":1000000,"lon_byn_dt":"20260115",
-              "tp_cd_nm":"신용융자","itg_bnc_tp_cd":"002"}]}
+              "pdt_tp_nm":"신용융자  ","lon_bnc_amt":1000000,"lon_byn_dt":"20260115",
+              "tp_cd_nm":"신용융자  "}]}
 """
 
 /** 대출이 없는 일반(위탁) 매수분 — NH 는 lon_bnc_amt 를 숫자 0 이 아니라 빈 문자열로 내려준다. */
@@ -467,7 +470,6 @@ class NhApiTest {
             assertEquals("20260115", h.loanDate)
             assertTrue(h.onCredit)
             assertEquals("신용융자", h.typeName)
-            assertEquals("002", h.typeCode)
         }
 
     @Test
@@ -483,7 +485,6 @@ class NhApiTest {
             assertEquals("", h.productType)
             assertFalse(h.onCredit)
             assertEquals("", h.typeName)
-            assertEquals("", h.typeCode)
         }
 
     @Test

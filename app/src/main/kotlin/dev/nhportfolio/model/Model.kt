@@ -26,7 +26,6 @@ data class Account(
  * @param loanAmt 대출잔고금액 (lon_bnc_amt)
  * @param loanDate 대출매수일자 (lon_byn_dt)
  * @param typeName 유형코드명 (tp_cd_nm)
- * @param typeCode 통합잔고유형코드 (itg_bnc_tp_cd)
  */
 data class Holding(
     val code: String,
@@ -41,16 +40,15 @@ data class Holding(
     val loanAmt: Long = 0,
     val loanDate: String = "",
     val typeName: String = "",
-    val typeCode: String = "",
 ) {
     /**
      * 줄의 신원. 목표 비중·현금성 지정·선택이 전부 이 값으로 키가 잡힌다.
      *
      * **유형코드명(`tp_cd_nm`)이 실제로 줄을 가르는 값이다.** 실기기 확인 결과(2026-09-06)
      * 이 값은 일반 1건 + 신용 2건짜리 종목, 일반 1건 + 신용 1건짜리 종목 모두에서 행마다
-     * 전부 달랐다 — 신용 두 건처럼 대출 여부만으로는 못 가르는 행도 갈라 준다. 반면
-     * 통합잔고유형코드(`itg_bnc_tp_cd`)는 같은 확인에서 모든 행이 빈 값으로 왔다 — 키에
-     * 넣어도 아무것도 가르지 못해 뺀다.
+     * 전부 달랐다 — 신용 두 건처럼 대출 여부만으로는 못 가르는 행도 갈라 준다. 통합잔고
+     * 유형코드(`itg_bnc_tp_cd`)는 같은 확인에서 모든 행이 빈 값으로 왔다 — 신원은 물론
+     * 화면 표시에도 못 써 필드 자체를 없앴다.
      *
      * 상품유형명(`pdt_tp_nm`)은 그대로 둔다. 실기기에서는 전 행이 빈 값이라 지금은 기여하지
      * 않지만, 채워 오는 계좌·상품이 있다면 공짜로 한 겹 더 가른다.

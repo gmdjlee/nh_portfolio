@@ -512,15 +512,15 @@ class RebalanceTest {
 
     @Test
     fun `상환으로 고아가 된 목표는 100퍼센트로 맞추기를 눌러도 살아있는 종목만으로 room 을 채운다`() {
-        // F2 재현: 신용상환으로 "005930|신용융자" 키가 사라지고 "005930|위탁" 으로 남았다.
+        // F2 재현: 신용상환으로 "005930||신용융자|L" 키가 사라지고 "005930||위탁|" 으로 남았다.
         // 고아가 된 옛 목표가 room 을 나눠 가지면 살아있는 종목의 목표 합이 room 에 못 미친다
         // — 목표 합계 화면이 "100%로 맞추기" 를 눌러도 채워지지 않는 것처럼 보인다.
-        val targets = mapOf("005930|신용융자" to 2000, "000660" to 6000)
-        val current = mapOf("005930|위탁" to 2500, "000660" to 7500)
+        val targets = mapOf("005930||신용융자|L" to 2000, "000660" to 6000)
+        val current = mapOf("005930||위탁|" to 2500, "000660" to 7500)
 
         val out = Rebalance.normalize(targets, current)
 
-        assertFalse("005930|신용융자" in out, "고아 목표가 자리를 차지했다: $out")
+        assertFalse("005930||신용융자|L" in out, "고아 목표가 자리를 차지했다: $out")
         assertEquals(10_000, out.values.sum(), "살아있는 종목의 목표 합이 room 을 정확히 채우지 못했다: $out")
     }
 

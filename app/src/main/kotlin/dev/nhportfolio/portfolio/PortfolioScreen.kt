@@ -654,8 +654,9 @@ private fun PortfolioTopBar(
 
 /**
  * 단건 편집 다이얼로그 제목에 쓸 종목명. 같은 종목코드가 현금분·신용분 두 줄로 갈리면
- * 상품유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을
- * 고치는지 알 수 없다. 문구는 NH 가 준 상품유형명([Holding.productType]) 그대로 쓴다.
+ * 유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을 고치는지
+ * 알 수 없다. 배지와 같은 기준으로, 유형코드명([Holding.typeName])이 있으면 그것을,
+ * 없으면 상품유형명([Holding.productType])을 쓴다.
  */
 internal fun holdingTitle(
     holdings: List<Holding>,
@@ -663,8 +664,9 @@ internal fun holdingTitle(
 ): String {
     val holding = holdings.firstOrNull { it.key == key } ?: return key
     val duplicateCode = holdings.count { it.code == holding.code } > 1
-    return if (duplicateCode && holding.productType.isNotBlank()) {
-        "${holding.name} (${holding.productType})"
+    val label = holding.typeName.ifBlank { holding.productType }
+    return if (duplicateCode && label.isNotBlank()) {
+        "${holding.name} ($label)"
     } else {
         holding.name
     }
@@ -1096,31 +1098,15 @@ private fun HoldingSpecs(holding: Holding?) {
         Spec("평균", holding.avgPrice.krw(), c, valueStyle)
         Spec("현재", holding.price.krw(), c, valueStyle)
     }
-    // 현금분·신용분의 신원을 가를 근거를 실기기에서 읽으려고 유형코드명·통합잔고유형·대출
-    // 정보를 그대로 보여준다 — 값이 하나도 없으면(평범한 행) 줄 자체를 그리지 않는다.
-    val typeLabel = holdingTypeLabel(holding.typeName, holding.typeCode)
-    if (typeLabel != null || holding.onCredit) {
+    // 유형명은 배지가 이미 보여주므로 여기서는 신용분에 한해 대출 정보만 더한다 —
+    // 평범한 행은 이 줄 자체를 그리지 않아 예전과 똑같이 보인다.
+    if (holding.onCredit) {
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.Bottom) {
-            typeLabel?.let { Spec("유형", it, c, valueStyle) }
-            if (holding.onCredit) {
-                Spec("대출잔고", holding.loanAmt.krw(), c, valueStyle)
-                Spec("대출일", holding.loanDate, c, valueStyle)
-            }
+            Spec("대출잔고", holding.loanAmt.krw(), c, valueStyle)
+            Spec("대출일", holding.loanDate, c, valueStyle)
         }
     }
 }
-
-/** 유형코드명·통합잔고유형코드 표시 문구. 둘 다 비어 있으면 null(그 줄을 그리지 않는다). */
-private fun holdingTypeLabel(
-    typeName: String,
-    typeCode: String,
-): String? =
-    when {
-        typeName.isNotBlank() && typeCode.isNotBlank() -> "$typeName ($typeCode)"
-        typeName.isNotBlank() -> typeName
-        typeCode.isNotBlank() -> typeCode
-        else -> null
-    }
 
 /** 명세 한 조각. 라벨과 숫자를 밑선으로 맞춘다. */
 @Composable

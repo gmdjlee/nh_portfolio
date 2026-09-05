@@ -8,7 +8,7 @@ import dev.nhportfolio.model.Balance
  * 비중 단위는 basis point (1250 = 12.50%). 분모는 `예수금 + Σ 평가금액`.
  */
 object Rebalance {
-    /** 현금 행의 신원. 어떤 `종목코드|상품유형명` 과도 겹치지 않아야 한다. */
+    /** 현금 행의 신원. 어떤 `종목코드|상품유형명|유형코드명|대출여부` 와도 겹치지 않아야 한다. */
     const val CASH = "\$CASH"
 
     private const val FULL_BP = 10_000
@@ -84,7 +84,7 @@ object Rebalance {
      * 목표가 없는 종목은 [currentWeightsBp] 의 현재 비중을 출발점으로 삼는다.
      *
      * [currentWeightsBp] 에 없는 목표 키(고아)는 room 을 나눠 갖지 못한다 — 신용상환처럼
-     * 종목은 그대로인데 신원(`종목코드|상품유형명`)만 바뀌면 옛 목표가 고아가 되고,
+     * 종목은 그대로인데 신원(`종목코드|상품유형명|유형코드명|대출여부`)만 바뀌면 옛 목표가 고아가 되고,
      * 그대로 두면 살아있는 종목들이 매번 room 을 다 못 채운다.
      *
      * [currentWeightsBp] 가 비어 있을 때는 걸러내지 않는다 — 잔고를 아직 못 받아 무엇이

@@ -8,6 +8,7 @@ import kotlin.test.assertEquals
 private fun holding(
     code: String,
     productType: String = "",
+    typeName: String = "",
 ) = Holding(
     code = code,
     name = "삼성전자",
@@ -18,6 +19,7 @@ private fun holding(
     evalAmt = 1,
     pnlRate = 0.0,
     productType = productType,
+    typeName = typeName,
 )
 
 class HoldingTitleTest {
@@ -45,7 +47,16 @@ class HoldingTitleTest {
     }
 
     @Test
+    fun `상품유형명이 비어도 유형코드명이 다르면 유형코드명을 덧붙여 구분한다`() {
+        val loan1 = holding("005930", typeName = "신용융자")
+        val loan2 = holding("005930", typeName = "신용대주")
+
+        assertEquals("삼성전자 (신용융자)", holdingTitle(listOf(loan1, loan2), loan1.key))
+        assertEquals("삼성전자 (신용대주)", holdingTitle(listOf(loan1, loan2), loan2.key))
+    }
+
+    @Test
     fun `key 에 해당하는 보유가 없으면 key 를 그대로 돌려준다`() {
-        assertEquals("사라진|위탁", holdingTitle(emptyList(), "사라진|위탁"))
+        assertEquals("사라진||위탁|", holdingTitle(emptyList(), "사라진||위탁|"))
     }
 }
