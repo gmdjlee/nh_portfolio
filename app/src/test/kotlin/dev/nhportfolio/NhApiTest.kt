@@ -90,6 +90,87 @@ private const val BALANCE_BLANK_LOAN_AMT_BODY = """
               "pdt_tp_nm":"위탁","lon_bnc_amt":"","lon_byn_dt":""}]}
 """
 
+private const val ETF_COMPONENTS_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_0":[{"iem_cd":"005930"},{"iem_cd":"000660"}]}
+"""
+
+/** 공백 채움 6자리, ISIN(KR7...), 빈 문자열, 중복이 섞여 온다. */
+private const val ETF_COMPONENTS_MIXED_CODES_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_0":[{"iem_cd":" 005930 "},{"iem_cd":"KR7005930003"},{"iem_cd":""},
+             {"iem_cd":"000660"},{"iem_cd":"000660"}]}
+"""
+
+/** 일자 순서가 뒤섞여 오고, 한 필드는 앞뒤 공백까지 채워져 있다("  71000"). */
+private const val DAILY_BARS_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료","Output_0":{},
+ "Output_1":[{"bsop_date":"20260103","stck_prpr":" 71000","stck_sdpr":"70000"},
+             {"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000"},
+             {"bsop_date":"20260104","stck_prpr":"72000","stck_sdpr":"71000"}]}
+"""
+
+/** DAILY_BARS_BODY 와 같은 세 날짜를 최신순으로 되돌린다 — 정렬이 순서에 기대면 안 된다. */
+private const val DAILY_BARS_DESC_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260104","stck_prpr":"72000","stck_sdpr":"71000"},
+             {"bsop_date":"20260103","stck_prpr":"71000","stck_sdpr":"70000"},
+             {"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000"}]}
+"""
+
+/** 20260103 은 stck_prpr 가 공백 채움이라 버려져야 한다. */
+private const val DAILY_BARS_BAD_CLOSE_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000"},
+             {"bsop_date":"20260103","stck_prpr":"   ","stck_sdpr":"70000"}]}
+"""
+
+/** stck_sdpr 가 빈 문자열이면 fcam_mod_cls_code 가 있어도 exRight 는 false 여야 한다. */
+private const val DAILY_BARS_BAD_REF_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"",
+              "fcam_mod_cls_code":"01"}]}
+"""
+
+private const val DAILY_BARS_EX_RIGHT_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000",
+              "fcam_mod_cls_code":"01"}]}
+"""
+
+/** flng_cls_code=02 는 배당락이다 — 권리락(수정주가 대상)이 아니다. */
+private const val DAILY_BARS_DIVIDEND_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260102","stck_prpr":"70000","stck_sdpr":"69000",
+              "flng_cls_code":"02"}]}
+"""
+
+/** dailyBars 의 수동 페이징 가드용 — 매 호출 같은 두 날짜만 되돌려 진전이 없다. */
+private const val DAILY_BARS_SAME_OLDEST_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260102","stck_prpr":"102","stck_sdpr":"102"},
+             {"bsop_date":"20260101","stck_prpr":"101","stck_sdpr":"101"}]}
+"""
+
+/** cts 없이 2건씩 잘려 오는 /period 응답의 첫/둘째/셋째 페이지 — edate 로만 이어 받는다. */
+private const val PERIOD_PAGE_1_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260110","stck_prpr":"110","stck_sdpr":"110"},
+             {"bsop_date":"20260109","stck_prpr":"109","stck_sdpr":"109"}]}
+"""
+
+private const val PERIOD_PAGE_2_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260108","stck_prpr":"108","stck_sdpr":"108"},
+             {"bsop_date":"20260107","stck_prpr":"107","stck_sdpr":"107"}]}
+"""
+
+private const val PERIOD_PAGE_3_BODY = """
+{"rsp_cd":"00000","rsp_msg":"완료",
+ "Output_1":[{"bsop_date":"20260106","stck_prpr":"106","stck_sdpr":"106"},
+             {"bsop_date":"20260105","stck_prpr":"105","stck_sdpr":"105"}]}
+"""
+
 private class ApiFixture {
     private val dir: File = Files.createTempDirectory("api").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 7 }, "HmacSHA256")
@@ -136,6 +217,7 @@ private class ApiFixture {
     }
 }
 
+@Suppress("LargeClass") // NhApi 표면이 늘수록 자연히 커진다 — 쪼갤 하위 도메인이 없다
 class NhApiTest {
     @Test
     fun `콜드 스타트는 토큰을 정확히 한 번 발급한다`() =
@@ -639,5 +721,242 @@ class NhApiTest {
             assertFailsWith<CancellationException> {
                 loadResult { throw CancellationException("cancelled") }
             }
+        }
+
+    @Test
+    fun `etfComponents 가 구성종목 코드 목록을 파싱한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(ETF_COMPONENTS_BODY) }
+
+            assertEquals(listOf("005930", "000660"), f.api.etfComponents("069500"))
+
+            val body = (f.requests.last { it.url.encodedPath.endsWith("/etfComponents") }.body as TextContent).text
+            assertTrue("\"iem_cd\":\"069500\"" in body, body)
+        }
+
+    @Test
+    fun `etfComponents 가 cts_flag=Y 일 때 다음 페이지를 이어 받는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            var page = 0
+            f.handle = { req ->
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> {
+                        json(TOKEN_BODY)
+                    }
+
+                    page++ == 0 -> {
+                        json(
+                            """{"rsp_cd":"00000","rsp_msg":"완료","Output_0":[{"iem_cd":"005930"}]}""",
+                            extra = headersOf("cts" to listOf("C1"), "cts_flag" to listOf("Y")),
+                        )
+                    }
+
+                    else -> {
+                        json("""{"rsp_cd":"00000","rsp_msg":"완료","Output_0":[{"iem_cd":"000660"}]}""")
+                    }
+                }
+            }
+
+            assertEquals(listOf("005930", "000660"), f.api.etfComponents("069500"))
+            val second = f.requests.last()
+            assertEquals("C1", second.headers["cts"])
+            assertEquals("Y", second.headers["cts_flag"])
+        }
+
+    @Test
+    fun `etfComponents 는 ISIN 을 단축코드로 바꾸고 공백과 중복을 정리한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(ETF_COMPONENTS_MIXED_CODES_BODY)
+            }
+
+            assertEquals(listOf("005930", "000660"), f.api.etfComponents("069500"))
+        }
+
+    @Test
+    fun `dailyBars 가 Output_1 을 Bar 로 옮기고 일자 오름차순으로 정렬한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_BODY) }
+
+            val bars = f.api.dailyBars("005930", count = 3)
+
+            assertEquals(listOf("20260102", "20260103", "20260104"), bars.map { it.date })
+            assertEquals(listOf(70000, 71000, 72000), bars.map { it.close }, "앞뒤 공백이 있는 \" 71000\" 도 파싱돼야 한다")
+            assertEquals(listOf(69000, 70000, 71000), bars.map { it.refPrice })
+            assertEquals(1, f.requests.count { it.url.encodedPath.endsWith("/period") }, "한 번에 다 왔으면 더 부르지 않는다")
+
+            val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
+            assertTrue("\"market_cd\":\"UNT\"" in body, body)
+            assertTrue("\"iem_cd\":\"005930\"" in body, body)
+            assertTrue("\"mrkt_div_cls_code\":\"1\"" in body, body)
+            assertTrue("\"gubun\":\"1\"" in body, body)
+            assertTrue("\"array_cnt\":\"3\"" in body, body)
+        }
+
+    @Test
+    fun `dailyBars 가 최신부터 내려온 응답도 같은 결과로 정렬한다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_DESC_BODY) }
+
+            val bars = f.api.dailyBars("005930", count = 3)
+
+            assertEquals(listOf("20260102", "20260103", "20260104"), bars.map { it.date })
+        }
+
+    @Test
+    fun `dailyBars 는 stck_prpr 가 양의 정수가 아니면 그 날을 버린다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_BAD_CLOSE_BODY)
+            }
+
+            val bars = f.api.dailyBars("005930", count = 1)
+
+            assertEquals(listOf("20260102"), bars.map { it.date })
+            assertEquals(70000, bars.single().close)
+        }
+
+    @Test
+    fun `dailyBars 는 stck_sdpr 가 양의 정수가 아니면 refPrice 0 이고 exRight 는 false 다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_BAD_REF_BODY)
+            }
+
+            val bar = f.api.dailyBars("005930", count = 1).single()
+
+            assertEquals(0, bar.refPrice)
+            assertFalse(bar.exRight, "기준가가 무효면 fcam_mod_cls_code 가 있어도 exRight 는 false 여야 한다")
+        }
+
+    @Test
+    fun `dailyBars 가 fcam_mod_cls_code=01 을 exRight=true 로 옮긴다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_EX_RIGHT_BODY)
+            }
+
+            assertTrue(
+                f.api
+                    .dailyBars("005930", count = 1)
+                    .single()
+                    .exRight,
+            )
+        }
+
+    @Test
+    fun `dailyBars 가 flng_cls_code=02 배당락은 exRight=false 로 둔다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_DIVIDEND_BODY)
+            }
+
+            assertFalse(
+                f.api
+                    .dailyBars("005930", count = 1)
+                    .single()
+                    .exRight,
+            )
+        }
+
+    @Test
+    fun `dailyBars 는 cts 없이 잘린 응답을 edate 로 이어 받고 요청 건수에 닿으면 멈춘다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            var page = 0
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    when (page++) {
+                        0 -> json(PERIOD_PAGE_1_BODY)
+                        1 -> json(PERIOD_PAGE_2_BODY)
+                        else -> json(PERIOD_PAGE_3_BODY)
+                    }
+                }
+            }
+
+            val bars = f.api.dailyBars("005930", count = 5)
+
+            assertEquals(
+                listOf("20260106", "20260107", "20260108", "20260109", "20260110"),
+                bars.map { it.date },
+            )
+            val periodBodies = f.requests.filter { it.url.encodedPath.endsWith("/period") }.map { (it.body as TextContent).text }
+            assertEquals(3, periodBodies.size)
+            assertTrue("\"edate\":\"\"" in periodBodies[0], periodBodies[0])
+            assertTrue("\"array_cnt\":\"5\"" in periodBodies[0], periodBodies[0])
+            assertTrue("\"edate\":\"20260108\"" in periodBodies[1], periodBodies[1])
+            assertTrue("\"array_cnt\":\"3\"" in periodBodies[1], periodBodies[1])
+            assertTrue("\"edate\":\"20260106\"" in periodBodies[2], periodBodies[2])
+            assertTrue("\"array_cnt\":\"1\"" in periodBodies[2], periodBodies[2])
+        }
+
+    @Test
+    fun `dailyBars 는 가장 오래된 일자가 그대로면 무한 루프 없이 멈춘다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(DAILY_BARS_SAME_OLDEST_BODY)
+            }
+
+            val bars = f.api.dailyBars("005930", count = 10)
+
+            assertEquals(listOf("20260101", "20260102"), bars.map { it.date })
+            assertEquals(2, f.requests.count { it.url.encodedPath.endsWith("/period") }, "진전이 없으면 멈춰야 한다")
+        }
+
+    @Test
+    fun `dailyBars 는 Output_1 이 없고 정상 응답이면 빈 목록이다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    json("""{"rsp_cd":"00000","rsp_msg":"조회가 완료되었습니다."}""")
+                }
+            }
+
+            assertTrue(f.api.dailyBars("005930", count = 5).isEmpty())
+        }
+
+    @Test
+    fun `dailyBars 의 업무 오류 응답은 NhException 이 되고 메시지가 그대로 담긴다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    json("""{"rsp_cd":"40010","rsp_msg":"종목코드 항목을 입력하세요."}""")
+                }
+            }
+
+            val e = assertFailsWith<NhException> { f.api.dailyBars("005930", count = 5) }
+            assertEquals("40010", e.code)
+            assertEquals("종목코드 항목을 입력하세요.", e.message)
         }
 }
