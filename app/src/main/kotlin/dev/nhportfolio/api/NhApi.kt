@@ -78,8 +78,8 @@ private const val BACKOFF_BASE_MS = 1_000L
 private const val BACKOFF_MAX_MS = 30_000L
 private const val BACKOFF_MAX_SHIFT = 5
 
-/** 종목 사이 간격은 MarketData 가 두지만 한 종목 안의 페이지 사이 간격은 여기서만 둘 수 있다. */
-private const val PAGE_DELAY_MS = 250L
+/** NH 초당 5회(요청 간 0.2초 이상) 제한 — call() 하나가 앱 전체 요청에 동일하게 적용한다. */
+private const val REQUEST_GAP_MS = 250L
 
 /** dailyBars 수동 페이징의 반복 상한 — 서버가 계속 진전만 있는 응답을 줘도 무한정 돌지 않는다. */
 private const val MAX_PAGES = 20
@@ -150,6 +150,9 @@ class NhApi(
                 retryOnConnectionFailure(false) // OkHttp 자체 재전송도 금지 — 토큰 POST 이중 발급 차단
             }
         },
+    /** 요청 게이트의 시계. 실제로는 실시간이지만, 테스트는 `runTest` 가상 시계를 주입해
+     *  실시간 잡음(코루틴 전환 등) 없이 간격을 결정적으로 검증한다. */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val client =
         HttpClient(engine) {
@@ -161,6 +164,10 @@ class NhApi(
             }
         }
     private val tokenMutex = Mutex()
+    private val gateMutex = Mutex()
+
+    /** 마지막으로 예약한 요청 슬롯. null 이면 아직 아무 요청도 없었다는 뜻이다(첫 요청은 대기 없음). */
+    private var nextSlotAt: Long? = null
 
     suspend fun accounts(): List<Account> {
         val pages =
@@ -227,7 +234,6 @@ class NhApi(
         // 진전이 있어도 MAX_PAGES 에서는 강제로 멈춘다(page cap) — 그마저 없으면 서버가 매번
         // 새 날짜를 하나씩만 주는 병적인 응답에 갇힌다.
         while (collected.size < count && page < MAX_PAGES) {
-            if (page > 0) delay(PAGE_DELAY_MS)
             page++
             val remaining = count - collected.size
             val batch =
@@ -247,6 +253,10 @@ class NhApi(
                                 },
                             )
                         },
+                    // 서버가 array_cnt 를 무시하고 cts 로 계속 밀어주면(실측: ~230봉/페이지) 이 hop 에
+                    // 필요한 만큼(remaining)만 모이는 순간 cts 를 더 따라가지 않는다 — 그 뒤는 어차피
+                    // takeLast(count) 로 버려질 옛날 봉이다.
+                    enough = { pages -> pages.sumOf { it.output1.orEmpty().size } >= remaining },
                 )
             val first = batch.first()
             val dtos = first.expect(first.output1, emptyList()) + batch.drop(1).flatMap { it.output1.orEmpty() }
@@ -335,6 +345,20 @@ class NhApi(
             .getOrElse { throw NhException("AUTH", "bad token body") }
     }
 
+    /** 요청 간 최소 간격을 앱 전체에서 한 곳(여기)으로 지킨다. 슬롯은 [nowMs] 로 예약만 하고,
+     *  실제 대기는 락 밖에서 한다 — 락 안에서 delay 하면 그동안 다른 요청이 슬롯조차 못 잡는다. */
+    private suspend fun reserveSlot() {
+        val waitMs =
+            gateMutex.withLock {
+                val now = nowMs()
+                val floor = nextSlotAt?.plus(REQUEST_GAP_MS) ?: now // 첫 요청은 지킬 이전 슬롯이 없다
+                val slot = maxOf(now, floor)
+                nextSlotAt = slot
+                slot - now
+            }
+        if (waitMs > 0) delay(waitMs)
+    }
+
     private suspend fun call(
         path: String,
         body: JsonObject,
@@ -344,6 +368,7 @@ class NhApi(
         var reissued = false
         var attempt = 0
         while (true) {
+            reserveSlot()
             val response =
                 client.post(REST + path) {
                     bearerAuth(bearer)
@@ -370,11 +395,18 @@ class NhApi(
         }
     }
 
-    /** 연속조회. `cts`/`cts_flag` 는 응답 **헤더**로 오고 다음 요청 헤더로 되돌려 보낸다. */
+    /**
+     * 연속조회. `cts`/`cts_flag` 는 응답 **헤더**로 오고 다음 요청 헤더로 되돌려 보낸다.
+     *
+     * [enough] 이 true 를 내면 cts 가 남아 있어도 그 자리에서 멈춘다 — 서버가 요청 건수(array_cnt)를
+     * 무시하고 몇 페이지고 더 줄 수 있는 API(quote/v1/period 가 그렇다) 에서, 호출부가 이미 필요한
+     * 만큼 받았으면 남은 수십 페이지를 마저 받았다가 버리는 낭비를 막는다. 기본값은 끝까지 받는다(false).
+     */
     @Suppress("ThrowsCount")
     private suspend inline fun <reified A, reified B> pages(
         path: String,
         input: JsonObject,
+        enough: (List<NhResponse<A, B>>) -> Boolean = { false },
     ): List<NhResponse<A, B>> {
         val out = mutableListOf<NhResponse<A, B>>()
         var cts: String? = null
@@ -392,6 +424,7 @@ class NhApi(
                 throw NhException(parsed.rspCd, parsed.rspMsg)
             }
             out += parsed
+            if (enough(out)) return out
             val next = response.headers["cts"]
             if (response.headers["cts_flag"] != "Y" || next.isNullOrEmpty() || next == cts) return out
             cts = next

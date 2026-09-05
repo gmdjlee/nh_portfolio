@@ -5,6 +5,8 @@ import dev.nhportfolio.market.Breadth
 import dev.nhportfolio.market.Signal
 import dev.nhportfolio.market.SyncState
 import dev.nhportfolio.market.Verdict
+import dev.nhportfolio.market.syncDoneText
+import dev.nhportfolio.market.syncProgressText
 import dev.nhportfolio.market.verdictText
 import dev.nhportfolio.portfolio.MarketUi
 import dev.nhportfolio.portfolio.Rebalance
@@ -171,5 +173,41 @@ class MarketTargetTest {
 
         assertTrue(detail.endsWith("기준 2026-01-01."), detail)
         assertFalse(detail.contains("경과"), detail)
+    }
+
+    // ---- syncProgressText ----
+
+    @Test
+    fun `진행 표본이 5 미만이면 ETA 없이 진행 개수만 보여준다`() {
+        val text = syncProgressText(SyncState.Running(4, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 4/200 종목", text)
+    }
+
+    @Test
+    fun `200개 중 10개를 60초 만에 끝냈으면 약 19분 남음을 보여준다`() {
+        val text = syncProgressText(SyncState.Running(10, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 10/200 종목 · 약 19분 남음", text)
+    }
+
+    @Test
+    fun `거의 다 됐으면 반올림 대신 1분 미만이라고 보여준다`() {
+        val text = syncProgressText(SyncState.Running(199, 200), startedAt = 0L, now = 60_000L)
+
+        assertEquals("갱신 중 199/200 종목 · 1분 미만", text)
+    }
+
+    // ---- syncDoneText ----
+
+    @Test
+    fun `완료 후 신호가 아직 없으면 거래일을 또 붙이지 않는다`() {
+        // 아래 안내 줄("아직 계산할 수 없습니다 — 거래일 N…")이 이미 N 을 보여주므로 여기서 중복하면 안 된다.
+        assertEquals("갱신 완료", syncDoneText(hasSignal = false, signalDays = 120))
+    }
+
+    @Test
+    fun `완료 후 신호가 있으면 거래일을 붙인다`() {
+        assertEquals("갱신 완료 · 거래일 120", syncDoneText(hasSignal = true, signalDays = 120))
     }
 }

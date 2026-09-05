@@ -20,6 +20,7 @@ import io.ktor.http.content.TextContent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -29,6 +30,7 @@ import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.io.path.createTempDirectory
@@ -268,7 +270,7 @@ class MarketDataTest {
     // ---- sync() : MockEngine ----
 
     @Test
-    fun `sync은 유니버스 1회와 종목 수만큼 호출하며 진행률을 순서대로 흘린다`() =
+    fun `sync은 유니버스 1회와 종목 수만큼 호출하며 진행률을 흘리고 완료로 끝난다`() =
         runTest {
             val f = MdFixture()
             f.ready()
@@ -299,16 +301,12 @@ class MarketDataTest {
 
             assertEquals(1, f.etfRequests())
             assertEquals(codes.size, f.periodRequests())
-            assertEquals(
-                listOf(
-                    SyncState.Running(0, 3),
-                    SyncState.Running(1, 3),
-                    SyncState.Running(2, 3),
-                    SyncState.Running(3, 3),
-                    SyncState.Done(0),
-                ),
-                states,
-            )
+            // 종목은 동시에(최대 4개 lane) 처리되므로 완료 순서는 보장되지 않는다 — 개수·집합으로만 검증한다.
+            assertEquals(SyncState.Running(0, 3), states.first(), "첫 상태는 항상 유니버스 확정 직후다")
+            assertEquals(SyncState.Done(0), states.last(), "마지막 상태는 항상 완료다")
+            assertEquals(5, states.size, "초기 1 + 종목 3 + 완료 1")
+            val doneValues = states.subList(1, states.size - 1).map { (it as SyncState.Running).done }.toSet()
+            assertEquals(setOf(1, 2, 3), doneValues, "종목마다 정확히 한 번씩, 1..3 이 모두 나와야 한다")
             val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
             assertTrue("\"array_cnt\":\"6\"" in body, body) // 어제까지 있었으니 gap(1)+여유(5)
         }
@@ -657,5 +655,76 @@ class MarketDataTest {
 
             val e = assertFailsWith<NhException> { f.market.sync().toList() }
             assertEquals("40010", e.code)
+        }
+
+    // ---- sync() : 동시 처리(lane) ----
+
+    @Test
+    fun `sync은 최대 4개 종목만 동시에 처리한다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val codes = (0 until 8).map { "L%06d".format(it) }
+            // 다들 어제까지 캐시가 있어 한 페이지(gap+여유)로 끝난다 — lane 수만 재려는 것이지 페이징을 재려는 게 아니다.
+            codes.forEach { writeUpStock(f.dir, it, listOf(today.minusDays(1).format(FMT))) }
+            writeUniverse(f.dir, at = today.format(FMT), codes = codes)
+
+            val inFlight = AtomicInteger(0)
+            val maxInFlight = AtomicInteger(0)
+            f.handle = { req ->
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> {
+                        json(TOKEN_BODY)
+                    }
+
+                    req.url.encodedPath.endsWith("/period") -> {
+                        val cur = inFlight.incrementAndGet()
+                        maxInFlight.updateAndGet { prev -> maxOf(prev, cur) }
+                        delay(1_000) // 응답을 붙잡아 둬야 동시 in-flight 개수가 겹쳐서 드러난다
+                        inFlight.decrementAndGet()
+                        periodResponse(req)
+                    }
+
+                    else -> {
+                        json("{}")
+                    }
+                }
+            }
+
+            f.market.sync().toList()
+
+            assertEquals(4, maxInFlight.get(), "SYNC_LANES(4) 를 넘는 동시 요청이 있으면 안 된다")
+            assertEquals(8, f.periodRequests())
+        }
+
+    @Test
+    fun `한 종목의 실패가 다른 종목의 저장을 막지 않는다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val codes = (0 until 8).map { "F%06d".format(it) }
+            val failCode = codes[3]
+            writeUniverse(f.dir, at = today.format(FMT), codes = codes)
+            // 전부 캐시가 없다(최초 백필) — lane 하나의 실패가 나머지 lane 을 막지 않아야 한다.
+
+            f.handle = { req ->
+                val text = (req.body as? TextContent)?.text.orEmpty()
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
+                    "\"iem_cd\":\"$failCode\"" in text -> json("""{"rsp_cd":"40010","rsp_msg":"조회 실패"}""")
+                    req.url.encodedPath.endsWith("/period") -> periodResponse(req)
+                    else -> json("{}")
+                }
+            }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(SyncState.Done(1), states.last())
+            codes.filter { it != failCode }.forEach {
+                assertTrue(File(f.dir, "bars/$it.json").exists(), "실패하지 않은 종목 $it 의 파일은 남아야 한다")
+            }
+            assertFalse(File(f.dir, "bars/$failCode.json").exists())
         }
 }
