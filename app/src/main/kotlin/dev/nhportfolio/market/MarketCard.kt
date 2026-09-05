@@ -65,7 +65,7 @@ internal fun verdictText(
     return title to detail.toString()
 }
 
-private fun Band.label(): String =
+internal fun Band.label(): String =
     when (this) {
         Band.MAX_DEFENSE -> "최대 방어"
         Band.DEFENSE -> "방어"
@@ -78,7 +78,8 @@ private fun Band.label(): String =
  * 시장 신호 카드. [heldBp] 는 (유지 비중, 예수금 목표 기준 여부) — [dev.nhportfolio.portfolio.heldBp] 가 만든다.
  *
  * 캐시가 모자라 [signal] 이 null 이면 판정 대신 확보한 거래일 수([signalDays])를 보여준다.
- * 카드를 누르면(버튼 제외) [onGuide] 로 밴드 지침 화면을 연다(Task 5 에서 실제로 연결한다).
+ * 카드를 누르면(버튼 제외) [onGuide] 로 밴드 지침 화면을 연다 — 그 시점의 밴드([Signal.band])를
+ * 같이 넘겨 지침 화면이 해당 밴드를 강조해 보여줄 수 있게 한다.
  */
 @Composable
 internal fun MarketCard(
@@ -90,7 +91,7 @@ internal fun MarketCard(
     today: LocalDate,
     onSync: () -> Unit,
     onApply: (Int) -> Unit,
-    onGuide: () -> Unit,
+    onGuide: (Band?) -> Unit,
 ) {
     // 최초 백필은 약 30MB 다운로드다 — 증분 갱신과 달리 매번 확인을 받는다.
     var confirmBackfill by remember { mutableStateOf(false) }
@@ -98,7 +99,7 @@ internal fun MarketCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clickable(onClickLabel = "밴드 지침", onClick = onGuide)
+            .clickable(onClickLabel = "밴드 지침", onClick = { onGuide(signal?.band) })
             .padding(start = 16.dp, end = 16.dp, top = 13.dp, bottom = 13.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {

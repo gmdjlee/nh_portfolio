@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.api.loadResult
+import dev.nhportfolio.market.Band
 import dev.nhportfolio.market.MarketCard
 import dev.nhportfolio.market.MarketData
 import dev.nhportfolio.market.Signal
@@ -446,7 +447,7 @@ fun toggleAll(
 fun PortfolioScreen(
     acctNo: String,
     onBack: () -> Unit,
-    onGuide: () -> Unit = {},
+    onGuide: (Band?) -> Unit = {},
     modifier: Modifier = Modifier,
     vm: PortfolioViewModel = koinViewModel { parametersOf(acctNo) },
 ) {

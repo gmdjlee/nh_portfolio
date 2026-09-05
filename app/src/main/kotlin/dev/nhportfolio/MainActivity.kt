@@ -33,6 +33,8 @@ import dev.nhportfolio.accounts.AccountsScreen
 import dev.nhportfolio.lock.LockViewModel
 import dev.nhportfolio.lock.PinFlow
 import dev.nhportfolio.lock.PinMode
+import dev.nhportfolio.market.Band
+import dev.nhportfolio.market.BandGuideScreen
 import dev.nhportfolio.portfolio.PortfolioScreen
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
@@ -100,6 +102,12 @@ sealed interface Route {
     @Serializable
     data class Portfolio(
         val no: String,
+    ) : Route
+
+    // Band 는 @Serializable 이 될 수 없다(Breadth.kt 가 라이브러리 임포트를 금지) — 이름만 String? 로 싣는다.
+    @Serializable
+    data class Guide(
+        val band: String? = null,
     ) : Route
 
     @Serializable
@@ -199,6 +207,16 @@ private fun AppNav() {
                         composable<Route.Portfolio> { entry ->
                             PortfolioScreen(
                                 acctNo = entry.toRoute<Route.Portfolio>().no,
+                                onBack = { nav.popBackStack() },
+                                onGuide = { nav.navigate(Route.Guide(it?.name)) },
+                            )
+                        }
+                        composable<Route.Guide> { entry ->
+                            BandGuideScreen(
+                                current =
+                                    entry.toRoute<Route.Guide>().band?.let { n ->
+                                        Band.entries.firstOrNull { it.name == n }
+                                    },
                                 onBack = { nav.popBackStack() },
                             )
                         }
