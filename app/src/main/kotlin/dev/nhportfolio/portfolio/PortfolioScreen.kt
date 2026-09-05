@@ -654,8 +654,9 @@ private fun PortfolioTopBar(
 
 /**
  * 단건 편집 다이얼로그 제목에 쓸 종목명. 같은 종목코드가 현금분·신용분 두 줄로 갈리면
- * 상품유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을
- * 고치는지 알 수 없다. 문구는 NH 가 준 상품유형명([Holding.productType]) 그대로 쓴다.
+ * 유형명을 덧붙여 구분한다 — 안 그러면 두 다이얼로그의 제목이 똑같아 어느 줄을 고치는지
+ * 알 수 없다. 배지와 같은 기준으로, 유형코드명([Holding.typeName])이 있으면 그것을,
+ * 없으면 상품유형명([Holding.productType])을 쓴다.
  */
 internal fun holdingTitle(
     holdings: List<Holding>,
@@ -663,8 +664,9 @@ internal fun holdingTitle(
 ): String {
     val holding = holdings.firstOrNull { it.key == key } ?: return key
     val duplicateCode = holdings.count { it.code == holding.code } > 1
-    return if (duplicateCode && holding.productType.isNotBlank()) {
-        "${holding.name} (${holding.productType})"
+    val label = holding.typeName.ifBlank { holding.productType }
+    return if (duplicateCode && label.isNotBlank()) {
+        "${holding.name} ($label)"
     } else {
         holding.name
     }
@@ -1034,7 +1036,7 @@ private fun HoldingRow(
                 )
                 // 문구는 NH 가 준 상품유형명을 그대로 쓴다 — 우리가 지어낸 말보다
                 // 실제와 어긋날 위험이 없다.
-                if (holding?.onCredit == true) CreditChip(holding.productType)
+                if (holding?.onCredit == true) CreditChip(holding.typeName.ifBlank { holding.productType })
             }
             // 2줄 — 무엇을 얼마에 들고 있는가. 예수금 행은 명세가 없어 이 줄을 그리지 않는다.
             HoldingSpecs(holding)
@@ -1095,6 +1097,14 @@ private fun HoldingSpecs(holding: Holding?) {
         Spec("잔고", "${holding.remainQty.shares()}주", c, valueStyle)
         Spec("평균", holding.avgPrice.krw(), c, valueStyle)
         Spec("현재", holding.price.krw(), c, valueStyle)
+    }
+    // 유형명은 배지가 이미 보여주므로 여기서는 신용분에 한해 대출 정보만 더한다 —
+    // 평범한 행은 이 줄 자체를 그리지 않아 예전과 똑같이 보인다.
+    if (holding.onCredit) {
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.Bottom) {
+            Spec("대출잔고", holding.loanAmt.krw(), c, valueStyle)
+            Spec("대출일", holding.loanDate, c, valueStyle)
+        }
     }
 }
 

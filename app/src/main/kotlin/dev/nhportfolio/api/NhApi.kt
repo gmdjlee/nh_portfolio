@@ -558,6 +558,10 @@ private data class HoldingDto(
     // 못 읽어 잔고 조회 전체가 죽는다(coerceInputValues/isLenient 둘 다 빈 문자열은 못 구한다).
     @SerialName("lon_bnc_amt") val loanAmt: String = "",
     @SerialName("lon_byn_dt") val loanDate: String = "",
+    // 상품유형명(pdt_tp_nm)이 실기기에서 비어 있어 현금분·신용분을 못 가른다 — typeName
+    // (유형코드명)이 실제로 신원을 가른다([Holding.key] 참고). 통합잔고유형코드(itg_bnc_tp_cd)는
+    // 실기기에서 늘 빈 값이라 신원·표시 어느 쪽에도 못 써 필드째 제거했다.
+    @SerialName("tp_cd_nm") val typeName: String = "",
 ) {
     fun toHolding() =
         Holding(
@@ -569,9 +573,10 @@ private data class HoldingDto(
             price = price,
             evalAmt = evalAmt,
             pnlRate = pnlRate,
-            productType = productType,
+            productType = productType.trim(),
             loanAmt = loanAmt.toLongOrNull() ?: 0,
             loanDate = loanDate,
+            typeName = typeName.trim(),
         )
 }
 
