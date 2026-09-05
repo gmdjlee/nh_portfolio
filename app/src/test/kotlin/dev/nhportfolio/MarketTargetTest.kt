@@ -3,9 +3,12 @@ package dev.nhportfolio
 import dev.nhportfolio.market.Action
 import dev.nhportfolio.market.Breadth
 import dev.nhportfolio.market.Signal
+import dev.nhportfolio.market.SyncState
 import dev.nhportfolio.market.Verdict
 import dev.nhportfolio.market.verdictText
+import dev.nhportfolio.portfolio.MarketUi
 import dev.nhportfolio.portfolio.Rebalance
+import dev.nhportfolio.portfolio.afterSyncFailure
 import dev.nhportfolio.portfolio.heldBp
 import dev.nhportfolio.portfolio.withMarketTarget
 import java.time.LocalDate
@@ -65,6 +68,21 @@ class MarketTargetTest {
 
         assertEquals(7_500, bp)
         assertFalse(fromCashTarget)
+    }
+
+    // ---- afterSyncFailure ----
+
+    @Test
+    fun `동기화 실패 뒤에는 Running 이 Idle 로 돌아가고 오류 문구가 남는다`() {
+        // Running 에 멈춰 있으면 카드의 갱신 버튼이 계속 비활성 상태다 — 리뷰 회귀 1라운드.
+        val stuck = MarketUi(signal = null, signalDays = 10, sync = SyncState.Running(3, 10), marketError = null)
+
+        val after = afterSyncFailure(stuck, "네트워크 오류")
+
+        assertEquals(SyncState.Idle, after.sync)
+        assertEquals("네트워크 오류", after.marketError)
+        // signal/signalDays 는 이 함수가 손대지 않는다 — 실패 직전까지 기록된 내용은 reloadMarket() 이 채운다.
+        assertEquals(10, after.signalDays)
     }
 
     // ---- verdictText: 기본 문구 ----

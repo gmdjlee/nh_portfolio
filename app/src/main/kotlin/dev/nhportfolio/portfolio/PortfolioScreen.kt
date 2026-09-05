@@ -144,8 +144,11 @@ data class PortfolioUi(
     val marketError: String? = null,
 )
 
-/** [signal]·[signalDays]·[sync]·[marketError] 를 한데 묶어 [PortfolioViewModel.ui] 의 combine 에 한 흐름으로 얹는다. */
-private data class MarketUi(
+/**
+ * [signal]·[signalDays]·[sync]·[marketError] 를 한데 묶어 [PortfolioViewModel.ui] 의 combine 에 한 흐름으로 얹는다.
+ * [afterSyncFailure] 테스트가 값을 만들어야 하므로 파일 전용(private)이 아니라 internal 이다.
+ */
+internal data class MarketUi(
     val signal: Signal? = null,
     val signalDays: Int = 0,
     val sync: SyncState = SyncState.Idle,
@@ -288,6 +291,12 @@ class PortfolioViewModel(
     /**
      * 종가 캐시를 갱신한다. 이미 진행 중이면 무시한다 — 두 번째 호출이 같은 파일을 동시에
      * 쓰게 두면 위험하다. 실패는 [PortfolioUi.marketError] 로 알리고, 취소는 그대로 다시 던진다.
+     *
+     * 흐름이 중간(종목 루프 도중의 쓰기 오류 등)에 예외를 던지면 마지막으로 받은 `Running` 이
+     * 그대로 남아 갱신 버튼이 계속 비활성 상태가 된다 — 그래서 catch 절에서 [afterSyncFailure]
+     * 로 `Idle` 로 되돌리고, 실패 직전까지 이미 기록된 종목들이 화면에 반영되도록 [reloadMarket]
+     * 을 한 번 더 부른다. `finally` 로 옮기면 안 된다 — 취소 경로에서는 이미 취소된 스코프의
+     * withContext 가 다시 던지므로 catch (Exception) 안에만 있어야 한다.
      */
     fun syncMarket() {
         if (syncJob?.isActive == true) return
@@ -301,7 +310,8 @@ class PortfolioViewModel(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    marketUi.value = marketUi.value.copy(marketError = e.userMessage())
+                    marketUi.value = afterSyncFailure(marketUi.value, e.userMessage())
+                    reloadMarket()
                 }
             }
     }
@@ -374,6 +384,16 @@ internal fun heldBp(
         plan.lines.filter { it.key != Rebalance.CASH }.sumOf { it.weightBp } to false
     }
 }
+
+/**
+ * 동기화가 중간에 실패했을 때의 다음 상태. 멈춰 있던 [SyncState.Running] 을 [SyncState.Idle] 로
+ * 되돌려 갱신 버튼을 되살리고 오류 문구를 남긴다. [MarketUi.signal]·[MarketUi.signalDays] 는
+ * 손대지 않는다 — 실패 직전까지 기록된 내용을 반영하는 것은 호출부가 다시 부르는 reloadMarket() 몫이다.
+ */
+internal fun afterSyncFailure(
+    ui: MarketUi,
+    message: String,
+): MarketUi = ui.copy(sync = SyncState.Idle, marketError = message)
 
 /** 현금성 자산이 합쳐졌으면 "예수금" 이 아니라 "현금" 이다 — 이름이 내용과 어긋나면 안 된다. */
 private fun cashLabel(cashAssets: Int): String = if (cashAssets > 0) "현금" else "예수금"
