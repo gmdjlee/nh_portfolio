@@ -1,0 +1,251 @@
+package dev.nhportfolio.market
+
+import kotlin.math.abs
+import kotlin.math.round
+
+/** 일봉 한 줄. NH 필드명을 모르는 시장 무관 타입이다.
+ *  [refPrice] 는 기준가, [exRight] 는 액면분할·병합·권리락이 있었던 날인지. */
+data class Bar(
+    val date: String,
+    val close: Int,
+    val refPrice: Int,
+    val exRight: Boolean,
+)
+
+enum class Band { MAX_DEFENSE, DEFENSE, NEUTRAL, ACTIVE, MAX_INVEST }
+
+enum class Action { HOLD, CUT, ADD }
+
+data class Signal(
+    val targetBp: Int,
+    val band: Band,
+    val breadth: Double,
+    val pctile: Double,
+    val window: Int,
+    val asOf: String,
+)
+
+/** [heldBp] 는 유지 비중 — 마지막으로 적용한 목표(사양 §2.3). 실제 비중이 아니다. */
+data class Verdict(
+    val action: Action,
+    val gapBp: Int,
+)
+
+/**
+ * 시장폭(breadth) 기반 주식 익스포저 목표. 순수 함수 — 네트워크도 안드로이드도 모른다.
+ *
+ * 종가 -> 200일선 상회 비율 -> 3년 백분위 -> 평활(sm) -> 앙상블(이동평균 길이 3개 × 평활 길이
+ * 3개 = 9개 구성) -> 1250bp 단위로 양자화. 이 파일에서 틀리면 사용자가 잘못된 금액으로
+ * 매매하게 되므로, 반올림은 전부 은행가 반올림([kotlin.math.round])만 쓴다.
+ */
+object Breadth {
+    const val PCT_WIN = 756
+    const val PCT_MIN = 252
+
+    private val MA_LENGTHS = listOf(150, 200, 250)
+    private val SM_LENGTHS = listOf(20, 40, 60)
+    private const val MA_DISPLAY = 200
+    private const val MIN_VALID_STOCKS = 30
+    private const val EIGHTHS = 8
+    private const val FULL_BP = 10_000
+    private const val HOLD_THRESHOLD_BP = 1_500
+
+    /**
+     * 수정주가 보정. 최신에서 과거 방향으로 훑으며, 액면분할·병합·권리락이 있었던 날의
+     * 기준가와 전일 종가의 비율이 2% 를 넘게 벌어질 때만 그 이전 종가에 누적 곱한다.
+     * 응답이 이미 수정주가면 비율이 1 에 붙어 저절로 통과한다.
+     */
+    fun adjust(bars: List<Bar>): IntArray {
+        val adjusted = DoubleArray(bars.size) { bars[it].close.toDouble() }
+        for (i in bars.lastIndex downTo 1) {
+            val bar = bars[i]
+            if (!bar.exRight) continue
+            val factor = bar.refPrice.toDouble() / adjusted[i - 1]
+            if (abs(factor - 1.0) > 0.02) {
+                for (j in 0 until i) adjusted[j] *= factor
+            }
+        }
+        return IntArray(adjusted.size) { round(adjusted[it]).toInt() }
+    }
+
+    /**
+     * 오늘의 익스포저 목표. [closes] 의 각 배열은 [dates] 와 길이가 같고, 상장 전이라 값이
+     * 없는 날은 0 이다(주가는 0 이 될 수 없으므로 안전한 빈칸이다).
+     *
+     * 200일선 상회 비율이나 그 3년 백분위조차 정의되지 않으면(관측 부족, 유효 종목 30 미만)
+     * null 을 돌려준다 — 근거 없는 숫자를 내느니 아무 숫자도 안 내는 쪽이 낫다.
+     */
+    fun signal(
+        closes: Map<String, IntArray>,
+        dates: List<String>,
+    ): Signal? {
+        if (dates.isEmpty()) return null
+        val days = dates.size
+        val stocks = closes.values
+
+        val breadthByMa = MA_LENGTHS.associateWith { ma -> breadthSeries(stocks, days, ma) }
+        val pctileByMa = breadthByMa.mapValues { (_, series) -> pctRank(series) }
+
+        val breadth = breadthByMa.getValue(MA_DISPLAY).last()
+        if (breadth.isNaN()) return null
+        val pctile = pctileByMa.getValue(MA_DISPLAY).last()
+        if (pctile.isNaN()) return null
+
+        // 구성마다 평활(최근 sm개 백분위 평균)이 아직 다 정의되지 않았을 수 있다 — 정의된
+        // 구성만으로 앙상블한다. 하나도 없으면 목표를 낼 근거가 없어 null 이다.
+        val rawSmooths =
+            MA_LENGTHS
+                .flatMap { ma -> SM_LENGTHS.map { sm -> smoothLast(pctileByMa.getValue(ma), sm) } }
+                .filter { !it.isNaN() }
+        if (rawSmooths.isEmpty()) return null
+
+        val targetBp = quantize(rawSmooths)
+        return Signal(
+            targetBp = targetBp,
+            band = bandOf(targetBp),
+            breadth = breadth,
+            pctile = pctile,
+            window = definedCount(breadthByMa.getValue(MA_DISPLAY), PCT_WIN),
+            asOf = dates.last(),
+        )
+    }
+
+    fun bandOf(targetBp: Int): Band =
+        when {
+            targetBp < 1_300 -> Band.MAX_DEFENSE
+            targetBp < 4_400 -> Band.DEFENSE
+            targetBp < 5_600 -> Band.NEUTRAL
+            targetBp < 8_150 -> Band.ACTIVE
+            else -> Band.MAX_INVEST
+        }
+
+    fun verdict(
+        targetBp: Int,
+        heldBp: Int,
+    ): Verdict {
+        val gapBp = targetBp - heldBp
+        val action =
+            when {
+                abs(gapBp) < HOLD_THRESHOLD_BP -> Action.HOLD
+                gapBp < 0 -> Action.CUT
+                else -> Action.ADD
+            }
+        return Verdict(action, gapBp)
+    }
+
+    /**
+     * 종목군의 [ma]일선 상회 비율 시계열. 분모는 종가와 이동평균이 둘 다 정의된 종목 수이며,
+     * 30 미만이면 그 날은 미정의(NaN)다. 이동평균은 이동합으로 계산해 창마다 O(1)로 갱신한다.
+     */
+    private fun breadthSeries(
+        stocks: Collection<IntArray>,
+        days: Int,
+        ma: Int,
+    ): DoubleArray {
+        val minPeriods = (ma * 0.75).toInt()
+        val aboveCount = IntArray(days)
+        val validCount = IntArray(days)
+        for (closes in stocks) accumulate(closes, days, ma, minPeriods, aboveCount, validCount)
+        return DoubleArray(days) { t ->
+            if (validCount[t] >= MIN_VALID_STOCKS) aboveCount[t].toDouble() / validCount[t] else Double.NaN
+        }
+    }
+
+    /** 종목 하나를 훑으며 이동합/이동개수로 [ma]일선을 유지하고, 유효·상회 여부를 누적한다. */
+    private fun accumulate(
+        closes: IntArray,
+        days: Int,
+        ma: Int,
+        minPeriods: Int,
+        aboveCount: IntArray,
+        validCount: IntArray,
+    ) {
+        var sum = 0L
+        var count = 0
+        for (t in 0 until days) {
+            val close = closes[t]
+            if (close != 0) {
+                sum += close
+                count++
+            }
+            if (t >= ma) {
+                val dropped = closes[t - ma]
+                if (dropped != 0) {
+                    sum -= dropped
+                    count--
+                }
+            }
+            if (count < minPeriods || close == 0) continue
+            validCount[t]++
+            if (close > sum.toDouble() / count) aboveCount[t]++
+        }
+    }
+
+    /**
+     * [values] 의 트레일링 백분위. 창 [win] 안의 정의된(비-NaN) 관측이 [minPeriods] 개
+     * 미만이면 NaN 이다. 동점은 평균 순위 — 오늘 값도 n 개 중 하나로 포함되어 "같음"에
+     * 스스로 잡힌다.
+     */
+    internal fun pctRank(
+        values: DoubleArray,
+        win: Int = PCT_WIN,
+        minPeriods: Int = PCT_MIN,
+    ): DoubleArray =
+        DoubleArray(values.size) { i ->
+            val current = values[i]
+            if (current.isNaN()) {
+                Double.NaN
+            } else {
+                val from = maxOf(0, i - win + 1)
+                var n = 0
+                var less = 0
+                var equal = 0
+                for (j in from..i) {
+                    val v = values[j]
+                    if (v.isNaN()) continue
+                    n++
+                    when {
+                        v < current -> less++
+                        v == current -> equal++
+                    }
+                }
+                if (n < minPeriods) Double.NaN else (less + (equal + 1) / 2.0) / n
+            }
+        }
+
+    /** 트레일링 창 [win] 안에 정의된(비-NaN) 관측 수. [Signal.window] 그대로다. */
+    private fun definedCount(
+        values: DoubleArray,
+        win: Int,
+    ): Int {
+        val from = maxOf(0, values.size - win)
+        return (from until values.size).count { !values[it].isNaN() }
+    }
+
+    /** 최근 [sm] 개 백분위의 평균. 그 [sm] 개가 전부 정의되어 있을 때만 정의된다. */
+    private fun smoothLast(
+        series: DoubleArray,
+        sm: Int,
+    ): Double {
+        if (series.size < sm) return Double.NaN
+        var sum = 0.0
+        for (i in series.size - sm until series.size) {
+            val v = series[i]
+            if (v.isNaN()) return Double.NaN
+            sum += v
+        }
+        return sum / sm
+    }
+
+    private fun roundToEighth(x: Double): Double = round(x * EIGHTHS) / EIGHTHS
+
+    /** 0~1 스코어 하나를 1250bp 단위로 양자화한다(은행가 반올림). */
+    internal fun quantize(x: Double): Int = round(roundToEighth(x) * FULL_BP).toInt()
+
+    /**
+     * 앙상블 양자화 — **두 번** 일어난다. [smooths] 각각을 먼저 1250bp 단위로 반올림하고,
+     * 그 평균을 낸 뒤 다시 반올림한다. 평활값을 바로 평균해 한 번만 반올림하면 결과가
+     * 달라진다(예: 5개 0.19 + 4개 0.17 은 두 번 양자화하면 2500bp, 한 번만 하면 1250bp).
+     */
+    internal fun quantize(smooths: List<Double>): Int = quantize(smooths.map(::roundToEighth).average())
+}
