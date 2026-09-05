@@ -378,6 +378,40 @@ class MarketDataTest {
         }
 
     @Test
+    fun `유니버스 파일의 at이 날짜로 파싱되지 않아도 갱신으로 복구한다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val code = "111111"
+            writeUniverse(f.dir, at = "garbage", codes = listOf(code))
+            writeUpStock(f.dir, code, listOf(today.format(FMT))) // 오늘까지 있으니 이 종목 자체는 요청되지 않는다
+
+            f.handle = { req ->
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> {
+                        json(TOKEN_BODY)
+                    }
+
+                    req.url.encodedPath.endsWith("/etfComponents") -> {
+                        json("""{"rsp_cd":"00000","rsp_msg":"완료","Output_0":[{"iem_cd":"$code"}]}""")
+                    }
+
+                    else -> {
+                        periodResponse(req)
+                    }
+                }
+            }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(1, f.etfRequests(), "at 이 깨졌으면 손상(=없음)으로 보고 다시 받아야 한다")
+            assertEquals(SyncState.Done(0), states.last())
+            val universeText = File(f.dir, "universe.json").readText()
+            assertTrue("\"at\":\"${today.format(FMT)}\"" in universeText, universeText)
+        }
+
+    @Test
     fun `유니버스가 90일 미만이면 다시 받지 않는다`() =
         runTest {
             val f = MdFixture()

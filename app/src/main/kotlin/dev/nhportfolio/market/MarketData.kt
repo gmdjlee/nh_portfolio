@@ -83,8 +83,12 @@ class MarketData(
             val today = LocalDate.now().format(DATE_FMT)
             val cachedUniverse = readJson<UniverseFile>(universeFile())
 
+            // at 이 YYYYMMDD 로 파싱되지 않으면(구조는 멀쩡한 손상) 없는 것과 같이 갱신 대상으로 본다 —
+            // 파싱 실패를 그냥 던지면 화면이 죽는다(§"파일이 깨지면 없는 것으로 본다"가 여기도 적용된다).
             val codes =
-                if (cachedUniverse == null || daysBetween(cachedUniverse.at, today) >= UNIVERSE_MAX_AGE_DAYS) {
+                if (cachedUniverse == null ||
+                    runCatching { daysBetween(cachedUniverse.at, today) }.getOrDefault(Long.MAX_VALUE) >= UNIVERSE_MAX_AGE_DAYS
+                ) {
                     loadResult { api.etfComponents(KODEX200) }.fold(
                         onSuccess = { fetched ->
                             val removed = cachedUniverse?.codes.orEmpty().toSet() - fetched.toSet()
@@ -92,7 +96,7 @@ class MarketData(
                             removed.forEach { barsFile(it).delete() }
                             fetched
                         },
-                        onFailure = { e -> cachedUniverse?.codes ?: throw e },
+                        onFailure = { e -> cachedUniverse?.codes?.takeIf { it.isNotEmpty() } ?: throw e },
                     )
                 } else {
                     cachedUniverse.codes
