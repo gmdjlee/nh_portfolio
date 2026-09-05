@@ -1034,7 +1034,7 @@ private fun HoldingRow(
                 )
                 // 문구는 NH 가 준 상품유형명을 그대로 쓴다 — 우리가 지어낸 말보다
                 // 실제와 어긋날 위험이 없다.
-                if (holding?.onCredit == true) CreditChip(holding.productType)
+                if (holding?.onCredit == true) CreditChip(holding.typeName.ifBlank { holding.productType })
             }
             // 2줄 — 무엇을 얼마에 들고 있는가. 예수금 행은 명세가 없어 이 줄을 그리지 않는다.
             HoldingSpecs(holding)

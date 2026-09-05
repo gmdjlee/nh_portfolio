@@ -623,6 +623,25 @@ class RebalanceTest {
         assertEquals(3_000, plan.targetSumBp, "목표가 두 줄에 겹치면 6_000 이 된다")
     }
 
+    /**
+     * 실기기 확인 결과(2026-09-06): `tp_cd_nm` 은 신용 두 건까지 전부 갈랐고 `itg_bnc_tp_cd` 는
+     * 늘 비어 있었다. 신용 두 건은 대출 여부만으로는 안 갈리므로, 유형코드명이 다르면 신원이
+     * 갈리고 같으면(진짜 충돌) 여전히 중복 경고가 떠야 한다.
+     */
+    @Test
+    fun `신용 두 건은 유형코드명이 다르면 갈리고 같으면 중복으로 표시한다`() {
+        val loan1 = holding("005930", 50, 70_000).copy(loanAmt = 1_000_000, typeName = "신용융자")
+        val loan2 = holding("005930", 30, 70_000).copy(loanAmt = 500_000, typeName = "신용대주")
+        assertNotEquals(loan1.key, loan2.key)
+        val distinctPlan = Rebalance.plan(Balance(cash = 0, holdings = listOf(loan1, loan2)), emptyMap())
+        assertFalse(distinctPlan.duplicateKeys, "유형코드명이 다르므로 중복 경고가 뜨면 안 된다")
+
+        val sameName = loan2.copy(typeName = "신용융자")
+        assertEquals(loan1.key, sameName.key)
+        val collidedPlan = Rebalance.plan(Balance(cash = 0, holdings = listOf(loan1, sameName)), emptyMap())
+        assertTrue(collidedPlan.duplicateKeys, "유형코드명까지 같은 진짜 충돌은 여전히 표시해야 한다")
+    }
+
     /** 대출을 갚아 신용에서 현금으로 바뀌면 신원도 바뀐다 — 저장된 목표는 고아가 된다(문서화된 대가). */
     @Test
     fun `대출을 갚으면 신원이 현금분과 같아진다`() {
