@@ -150,6 +150,9 @@ class NhApi(
                 retryOnConnectionFailure(false) // OkHttp 자체 재전송도 금지 — 토큰 POST 이중 발급 차단
             }
         },
+    /** 요청 게이트의 시계. 실제로는 실시간이지만, 테스트는 `runTest` 가상 시계를 주입해
+     *  실시간 잡음(코루틴 전환 등) 없이 간격을 결정적으로 검증한다. */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val client =
         HttpClient(engine) {
@@ -163,8 +166,8 @@ class NhApi(
     private val tokenMutex = Mutex()
     private val gateMutex = Mutex()
 
-    /** 마지막으로 예약한 요청 슬롯(nanoTime 을 ms 로 내림한 값). */
-    private var nextSlotAt = 0L
+    /** 마지막으로 예약한 요청 슬롯. null 이면 아직 아무 요청도 없었다는 뜻이다(첫 요청은 대기 없음). */
+    private var nextSlotAt: Long? = null
 
     suspend fun accounts(): List<Account> {
         val pages =
@@ -342,20 +345,18 @@ class NhApi(
             .getOrElse { throw NhException("AUTH", "bad token body") }
     }
 
-    /** 요청 간 최소 간격을 앱 전체에서 한 곳(여기)으로 지킨다. 슬롯은 실시간(nanoTime)으로
-     *  예약만 하고, 실제 대기는 락 밖에서 한다 — 락 안에서 delay 하면 그동안 다른 요청이 슬롯조차 못 잡는다. */
+    /** 요청 간 최소 간격을 앱 전체에서 한 곳(여기)으로 지킨다. 슬롯은 [nowMs] 로 예약만 하고,
+     *  실제 대기는 락 밖에서 한다 — 락 안에서 delay 하면 그동안 다른 요청이 슬롯조차 못 잡는다. */
     private suspend fun reserveSlot() {
         val waitMs =
             gateMutex.withLock {
-                val now = System.nanoTime() / 1_000_000
-                val slot = maxOf(now, nextSlotAt + REQUEST_GAP_MS)
+                val now = nowMs()
+                val floor = nextSlotAt?.plus(REQUEST_GAP_MS) ?: now // 첫 요청은 지킬 이전 슬롯이 없다
+                val slot = maxOf(now, floor)
                 nextSlotAt = slot
                 slot - now
             }
-        // ponytail: 10ms 단위로 올림한다 — 예약 사이에 실행되는 코드(응답 파싱, 코루틴 전환 등)가
-        // 실시간으로 몇 ms 를 먹어 정확히 250 을 요구하면 근소하게 모자랄 수 있다. 실제 요청
-        // 간격(2초대)에 비하면 최대 10ms 여유는 무시할 수준이다 — 더 정밀해야 하면 그때 좁힌다.
-        if (waitMs > 0) delay(((waitMs + 9) / 10) * 10)
+        if (waitMs > 0) delay(waitMs)
     }
 
     private suspend fun call(

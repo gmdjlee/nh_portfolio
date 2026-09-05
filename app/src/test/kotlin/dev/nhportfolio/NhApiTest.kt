@@ -201,7 +201,9 @@ private const val PERIOD_REGRESS_B_BODY = """
              {"bsop_date":"20260109","stck_prpr":"109","stck_sdpr":"109"}]}
 """
 
-private class ApiFixture {
+private class ApiFixture(
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
+) {
     private val dir: File = Files.createTempDirectory("api").toFile()
     private val macKey = SecretKeySpec(ByteArray(32) { 7 }, "HmacSHA256")
 
@@ -229,6 +231,7 @@ private class ApiFixture {
                 requests += request
                 handle(request)
             },
+            nowMs,
         )
 
     val tokenCalls get() = requests.count { it.url.encodedPath == "/oauth2/token" }
@@ -666,7 +669,9 @@ class NhApiTest {
     @Test
     fun `429 는 지연만 하고 토큰을 건드리지 않는다`() =
         runTest {
-            val f = ApiFixture()
+            // 게이트에 runTest 의 가상 시계를 주입한다 — 실시계(nanoTime)와 가상 delay 를 섞으면
+            // 코루틴 전환 등 실시간 잡음이 몇 ms 끼어들어 판정이 흔들린다(리뷰 지적).
+            val f = ApiFixture(nowMs = { currentTime })
             f.ready()
             f.seedToken("T0", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis())
             var attempts = 0
@@ -674,9 +679,10 @@ class NhApiTest {
 
             val before = currentTime
             assertEquals(1, f.api.accounts().size)
-            // 300+600 은 최소 보장이다 — 재시도도 client.post 라 전역 요청 게이트(250ms, C2)를 거치므로
-            // 실제 지연은 이보다 길 수 있다. 게이트가 토큰을 건드리지 않는지는 tokenCalls 로 따로 잡는다.
-            assertTrue(currentTime - before >= 900, "지연은 최소 300+600=900ms 여야 한다: ${currentTime - before}")
+            // 첫 게이트는 대기가 없고(이전 슬롯이 없으므로), 재시도 사이의 백오프(300, 600)가 이미
+            // 게이트 간격(250)보다 커서 두 번째·세 번째 게이트는 대기 없이 흡수된다 — 총 지연은
+            // 정확히 300+600=900 이다. 게이트가 토큰을 건드리지 않는지는 tokenCalls 로 따로 잡는다.
+            assertEquals(900L, currentTime - before, "지연은 정확히 300+600=900ms 여야 한다")
             assertEquals(0, f.tokenCalls)
             assertEquals(3, f.requests.size)
         }
@@ -1115,17 +1121,17 @@ class NhApiTest {
     @Test
     fun `요청 사이에는 최소 250ms 간격을 앱 전체에서 지킨다`() =
         runTest {
-            val f = ApiFixture()
+            // 게이트에 runTest 의 가상 시계를 주입한다 — 실시계(nanoTime)를 쓰면 두 예약 사이에
+            // 실행되는 코드(JSON 파싱, 코루틴 전환)가 실시간으로 몇 ms 를 먹어 간격이 근소하게
+            // 모자랄 수 있다(리뷰 지적). 가상 시계는 delay 로만 흐르므로 결정적이다.
+            val f = ApiFixture(nowMs = { currentTime })
             f.ready()
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else json(ACCOUNTS_BODY) }
 
             f.api.accounts() // 토큰 발급 + 첫 gate 요청 — 아직 예약이 없으니 대기 없이 통과한다
             val afterFirst = currentTime
-            f.api.accounts() // 토큰은 캐시되니 gate 요청 하나뿐 — 첫 요청 슬롯으로부터 250ms 는 떨어져야 한다
+            f.api.accounts() // 토큰은 캐시되니 gate 요청 하나뿐 — 첫 요청 슬롯으로부터 정확히 250ms 뒤에 시작해야 한다
 
-            assertTrue(
-                currentTime - afterFirst >= 250,
-                "두 번째 요청은 첫 요청 슬롯 뒤 250ms 이상 지나야 한다: ${currentTime - afterFirst}ms",
-            )
+            assertEquals(250L, currentTime - afterFirst, "두 번째 요청은 첫 요청 슬롯 뒤 정확히 250ms 에 시작해야 한다")
         }
 }
