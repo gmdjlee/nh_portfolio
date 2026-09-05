@@ -25,6 +25,8 @@ data class Account(
  * @param productType 상품유형명 (pdt_tp_nm) — 배지에 그대로 쓴다
  * @param loanAmt 대출잔고금액 (lon_bnc_amt)
  * @param loanDate 대출매수일자 (lon_byn_dt)
+ * @param typeName 유형코드명 (tp_cd_nm)
+ * @param typeCode 통합잔고유형코드 (itg_bnc_tp_cd)
  */
 data class Holding(
     val code: String,
@@ -38,6 +40,8 @@ data class Holding(
     val productType: String = "",
     val loanAmt: Long = 0,
     val loanDate: String = "",
+    val typeName: String = "",
+    val typeCode: String = "",
 ) {
     /**
      * 줄의 신원. 목표 비중·현금성 지정·선택이 전부 이 값으로 키가 잡힌다.

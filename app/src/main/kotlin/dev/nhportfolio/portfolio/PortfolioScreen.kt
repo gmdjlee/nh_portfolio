@@ -1096,7 +1096,31 @@ private fun HoldingSpecs(holding: Holding?) {
         Spec("평균", holding.avgPrice.krw(), c, valueStyle)
         Spec("현재", holding.price.krw(), c, valueStyle)
     }
+    // 현금분·신용분의 신원을 가를 근거를 실기기에서 읽으려고 유형코드명·통합잔고유형·대출
+    // 정보를 그대로 보여준다 — 값이 하나도 없으면(평범한 행) 줄 자체를 그리지 않는다.
+    val typeLabel = holdingTypeLabel(holding.typeName, holding.typeCode)
+    if (typeLabel != null || holding.onCredit) {
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.Bottom) {
+            typeLabel?.let { Spec("유형", it, c, valueStyle) }
+            if (holding.onCredit) {
+                Spec("대출잔고", holding.loanAmt.krw(), c, valueStyle)
+                Spec("대출일", holding.loanDate, c, valueStyle)
+            }
+        }
+    }
 }
+
+/** 유형코드명·통합잔고유형코드 표시 문구. 둘 다 비어 있으면 null(그 줄을 그리지 않는다). */
+private fun holdingTypeLabel(
+    typeName: String,
+    typeCode: String,
+): String? =
+    when {
+        typeName.isNotBlank() && typeCode.isNotBlank() -> "$typeName ($typeCode)"
+        typeName.isNotBlank() -> typeName
+        typeCode.isNotBlank() -> typeCode
+        else -> null
+    }
 
 /** 명세 한 조각. 라벨과 숫자를 밑선으로 맞춘다. */
 @Composable
