@@ -378,6 +378,37 @@ class MarketDataTest {
         }
 
     @Test
+    fun `유니버스 응답이 비어 있으면 캐시를 지우지 않고 기존 목록으로 진행한다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val codeA = "111111"
+            val codeB = "222222"
+            writeUniverse(f.dir, at = today.minusDays(91).format(FMT), codes = listOf(codeA, codeB))
+            writeUpStock(f.dir, codeA, listOf(today.format(FMT)))
+            writeUpStock(f.dir, codeB, listOf(today.format(FMT)))
+            val universeBefore = File(f.dir, "universe.json").readText()
+
+            f.handle = { req ->
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
+                    req.url.encodedPath.endsWith("/etfComponents") -> json("""{"rsp_cd":"00000","rsp_msg":"완료","Output_0":[]}""")
+                    else -> periodResponse(req)
+                }
+            }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(1, f.etfRequests())
+            assertEquals(SyncState.Running(0, 2), states.first(), "빈 응답이면 캐시된 2개 목록으로 계속 진행해야 한다")
+            assertEquals(SyncState.Done(0), states.last())
+            assertTrue(File(f.dir, "bars/$codeA.json").exists(), "빈 응답이 캐시된 종목의 봉 파일을 지우면 안 된다")
+            assertTrue(File(f.dir, "bars/$codeB.json").exists())
+            assertEquals(universeBefore, File(f.dir, "universe.json").readText(), "빈 응답으로 universe.json 을 덮어쓰면 안 된다")
+        }
+
+    @Test
     fun `유니버스 파일의 at이 날짜로 파싱되지 않아도 갱신으로 복구한다`() =
         runTest {
             val f = MdFixture()
@@ -449,6 +480,30 @@ class MarketDataTest {
             val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
             assertTrue("\"iem_cd\":\"$corrupt\"" in body, body)
             assertTrue("\"array_cnt\":\"1100\"" in body, "캐시 없는(손상=없음) 종목은 최초 백필 건수를 요청해야 한다: $body")
+        }
+
+    @Test
+    fun `일자가 깨진 종목 파일은 없는 것으로 보고 다시 받는다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now().format(FMT)
+            val code = "111111"
+            writeUniverse(f.dir, at = today, codes = listOf(code))
+            writeBars(f.dir, code, dates = listOf("garbage"), closes = listOf(100))
+
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
+
+            f.market.sync().toList()
+
+            assertEquals(1, f.periodRequests(), "일자가 깨졌으면 없는 파일로 보고 다시 받아야 한다")
+            val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
+            assertTrue("\"array_cnt\":\"1100\"" in body, "캐시 없는(손상=없음) 종목이라 최초 백필 건수를 요청해야 한다: $body")
+            assertFalse(
+                "garbage" in File(f.dir, "bars/$code.json").readText(),
+                "손상된 일자가 병합을 거쳐 파일에 그대로 남으면 안 된다",
+            )
+            assertEquals(1100, f.market.cachedDays(), "다시 받은 봉만 반영돼야 한다")
         }
 
     @Test

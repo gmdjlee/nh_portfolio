@@ -1,6 +1,7 @@
 package dev.nhportfolio.market
 
 import dev.nhportfolio.api.NhApi
+import dev.nhportfolio.api.NhException
 import dev.nhportfolio.api.loadResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +29,7 @@ private const val GAP_MARGIN_DAYS = 5
 private const val SYNC_DELAY_MS = 250L
 
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
+private val DATE_REGEX = Regex("^\\d{8}$")
 
 sealed interface SyncState {
     data object Idle : SyncState
@@ -89,15 +91,19 @@ class MarketData(
                 if (cachedUniverse == null ||
                     runCatching { daysBetween(cachedUniverse.at, today) }.getOrDefault(Long.MAX_VALUE) >= UNIVERSE_MAX_AGE_DAYS
                 ) {
-                    loadResult { api.etfComponents(KODEX200) }.fold(
-                        onSuccess = { fetched ->
-                            val removed = cachedUniverse?.codes.orEmpty().toSet() - fetched.toSet()
-                            writeJson(universeFile(), UniverseFile(at = today, codes = fetched))
-                            removed.forEach { barsFile(it).delete() }
-                            fetched
-                        },
-                        onFailure = { e -> cachedUniverse?.codes?.takeIf { it.isNotEmpty() } ?: throw e },
-                    )
+                    // 빈 응답도 실패와 똑같이 다룬다 — 그대로 밀어붙이면 캐시된 종목의 봉 파일이 전부
+                    // 지워지고, 빈 유니버스가 오늘 날짜로 저장돼 90일간 스스로 회복하지 못한다.
+                    loadResult { api.etfComponents(KODEX200) }
+                        .mapCatching { fetched -> fetched.ifEmpty { throw NhException("EMPTY", "유니버스 응답이 비어 있습니다") } }
+                        .fold(
+                            onSuccess = { fetched ->
+                                val removed = cachedUniverse?.codes.orEmpty().toSet() - fetched.toSet()
+                                writeJson(universeFile(), UniverseFile(at = today, codes = fetched))
+                                removed.forEach { barsFile(it).delete() }
+                                fetched
+                            },
+                            onFailure = { e -> cachedUniverse?.codes?.takeIf { it.isNotEmpty() } ?: throw e },
+                        )
                 } else {
                     cachedUniverse.codes
                 }
@@ -146,8 +152,14 @@ class MarketData(
         tmp.renameTo(file)
     }
 
-    /** dates·closes 길이가 어긋나면(부분 기록·손상) 없는 파일로 본다 — 그 종목은 조용히 다시 받는다. */
-    private fun readBars(code: String): BarsFile? = readJson<BarsFile>(barsFile(code))?.takeIf { it.dates.size == it.closes.size }
+    /**
+     * dates·closes 길이가 어긋나거나(부분 기록) dates 중 하나라도 YYYYMMDD 8자리가 아니면
+     * (손상) 없는 파일로 본다 — 그 종목은 조용히 다시 받는다. 여기서 걸러야 손상된 일자가
+     * 병합을 거쳐 파일에 그대로 남는 일 없이 스스로 회복된다.
+     */
+    private fun readBars(code: String): BarsFile? =
+        readJson<BarsFile>(barsFile(code))
+            ?.takeIf { it.dates.size == it.closes.size && it.dates.all { d -> DATE_REGEX.matches(d) } }
 
     private fun BarsFile.toBars(): List<Bar> =
         dates.indices.map { i ->
