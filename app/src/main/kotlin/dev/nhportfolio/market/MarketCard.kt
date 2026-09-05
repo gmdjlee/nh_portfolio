@@ -52,6 +52,16 @@ internal fun syncProgressText(
 }
 
 /**
+ * 갱신이 끝난 뒤 보여줄 문구. [hasSignal] 이 false(캐시가 아직 모자람)면 "거래일 N" 을 붙이지
+ * 않는다 — [SignalOrPlaceholder] 의 "아직 계산할 수 없습니다 — 거래일 N…" 줄이 이미 N 을
+ * 보여주므로, 여기서 또 붙이면 같은 숫자가 두 줄에 겹친다.
+ */
+internal fun syncDoneText(
+    hasSignal: Boolean,
+    signalDays: Int,
+): String = if (hasSignal) "갱신 완료 · 거래일 $signalDays" else "갱신 완료"
+
+/**
  * 판정 문구를 만든다. [today] 는 화면이 한 번 계산해 넘긴 오늘 날짜 — 이 함수 자체는 시계를 보지 않는다.
  *
  * 실행 방식 문구까지 한 함수에서 만든다. 갈래가 세 가지(HOLD/CUT/ADD)뿐이라 템플릿 엔진 없이
@@ -142,7 +152,7 @@ internal fun MarketCard(
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
 
-        SyncStatusLine(sync, syncStartedAt, signalDays)
+        SyncStatusLine(sync, syncStartedAt, signalDays, hasSignal = signal != null)
         SignalOrPlaceholder(signal, signalDays, sync, heldBp, actualBp, today, onApply)
 
         if (sync is SyncState.Done && sync.failed > 0) {
@@ -176,6 +186,7 @@ private fun SyncStatusLine(
     sync: SyncState,
     syncStartedAt: Long,
     signalDays: Int,
+    hasSignal: Boolean,
 ) {
     if (sync is SyncState.Running) {
         LinearProgressIndicator(
@@ -184,7 +195,7 @@ private fun SyncStatusLine(
         )
         Text(syncProgressText(sync, syncStartedAt, System.currentTimeMillis()), style = MaterialTheme.typography.bodySmall)
     } else if (sync is SyncState.Done) {
-        Text("갱신 완료 · 거래일 $signalDays", style = MaterialTheme.typography.bodySmall)
+        Text(syncDoneText(hasSignal, signalDays), style = MaterialTheme.typography.bodySmall)
     }
 }
 
