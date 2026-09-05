@@ -129,6 +129,9 @@ PIN 을 5회 틀리면 30초 잠기고 실패마다 두 배로 늘어난다(상�
 
 - 설계: `docs/superpowers/specs/2026-08-30-nh-portfolio-design.md`
 - 구현 계획: `docs/superpowers/plans/2026-08-30-nh-portfolio.md`
+- 거래이력·시계열 차트 타당성 검토: `docs/superpowers/specs/2026-09-05-history-timeseries-feasibility.md`
+- 시장 비중 관리 검토·사양: `docs/superpowers/specs/2026-09-05-market-exposure-model.md`
+- 시장 비중 관리 구현 계획: `docs/superpowers/plans/2026-09-05-market-exposure.md`
 
 설계 §14 에 실기기에서 확인해야 할 항목(체결통보 프레임 형태, `pft_rt` 단위,
 `nxt2_dd_dca` 의 당일 반영 여부 등)이 남아 있다.
