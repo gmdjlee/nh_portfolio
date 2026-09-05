@@ -1,6 +1,7 @@
 package dev.nhportfolio.api
 
 import android.util.Log
+import dev.nhportfolio.market.Bar
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
@@ -48,6 +49,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.IOException
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
@@ -74,6 +77,12 @@ private const val BACKOFF_JITTER_MS = 500L
 private const val BACKOFF_BASE_MS = 1_000L
 private const val BACKOFF_MAX_MS = 30_000L
 private const val BACKOFF_MAX_SHIFT = 5
+
+/** 종목 사이 간격은 MarketData 가 두지만 한 종목 안의 페이지 사이 간격은 여기서만 둘 수 있다. */
+private const val PAGE_DELAY_MS = 250L
+
+/** dailyBars 수동 페이징의 반복 상한 — 서버가 계속 진전만 있는 응답을 줘도 무한정 돌지 않는다. */
+private const val MAX_PAGES = 20
 
 val NhJson: Json =
     Json {
@@ -187,6 +196,73 @@ class NhApi(
             cash = first.expect(first.output0, BalanceSummaryDto()).cash,
             holdings = pages.flatMap { it.output1.orEmpty() }.map { it.toHolding() },
         )
+    }
+
+    /** ETF 구성종목의 종목코드. 유니버스 조달 경로다(krstock 에 랭킹 API 가 없다). */
+    suspend fun etfComponents(etfCode: String): List<String> {
+        val pages =
+            pages<List<ComponentDto>, JsonElement>(
+                path = "/krstock/quote/v1/etfComponents",
+                input = buildJsonObject { put("Input_0", buildJsonObject { put("iem_cd", etfCode) }) },
+            )
+        val first = pages.first()
+        val all = first.expect(first.output0, emptyList()) + pages.drop(1).flatMap { it.output0.orEmpty() }
+        return all.mapNotNull { shortCode(it.code) }.distinct()
+    }
+
+    /** 일봉. [count] 는 읽을 건수, [endDate] 는 YYYYMMDD(비우면 최근). 오래된 것부터 정렬해 돌려준다. */
+    suspend fun dailyBars(
+        code: String,
+        count: Int,
+        endDate: String = "",
+    ): List<Bar> {
+        if (count <= 0) return emptyList()
+        val collected = LinkedHashMap<String, Bar>()
+        var edate = endDate
+        var oldestSeen: String? = null
+        var page = 0
+        // array_cnt 상한이 명세에 없다 — 서버가 cts 없이 자르면 가장 오래된 일자의 전날을 edate 로
+        // 넣어 수동으로 이어 받는다. 요청 건수에 닿거나(count) 빈 응답이거나, 오래된 일자가 뒤로
+        // 가지 않으면(진전 없음 — 반복은 물론 서버가 역행하는 경우까지) 멈춘다 — 후자가 무한 루프를 막는다.
+        // 진전이 있어도 MAX_PAGES 에서는 강제로 멈춘다(page cap) — 그마저 없으면 서버가 매번
+        // 새 날짜를 하나씩만 주는 병적인 응답에 갇힌다.
+        while (collected.size < count && page < MAX_PAGES) {
+            if (page > 0) delay(PAGE_DELAY_MS)
+            page++
+            val remaining = count - collected.size
+            val batch =
+                pages<JsonElement, List<BarDto>>(
+                    path = "/krstock/quote/v1/period",
+                    input =
+                        buildJsonObject {
+                            put(
+                                "Input_0",
+                                buildJsonObject {
+                                    put("market_cd", "UNT") // 통합시세 — balance() 의 qut_dit_cd 와 같은 기준
+                                    put("iem_cd", code)
+                                    put("mrkt_div_cls_code", "1") // 거래소
+                                    put("gubun", "1") // 일봉
+                                    put("edate", edate)
+                                    put("array_cnt", remaining.toString())
+                                },
+                            )
+                        },
+                )
+            val first = batch.first()
+            val dtos = first.expect(first.output1, emptyList()) + batch.drop(1).flatMap { it.output1.orEmpty() }
+            // bsop_date 가 8자리 숫자가 아닌 행은 toBar() 가 통째로 버린다 — oldest 는 살아남은
+            // 행에서만 구해야 dayBefore() 에 빈 문자열이 들어가는 일이 없다.
+            val bars = dtos.mapNotNull { it.toBar() }
+            for (bar in bars) collected[bar.date] = bar
+
+            // 빈 응답이거나(oldest == null), 가장 오래된 일자가 뒤로 가지 않으면 멈춘다 — 서버가
+            // 같은 값을 반복하거나(진전 없음) edate 를 무시하고 역행해도 여기서 끊는다.
+            val oldest = bars.minOfOrNull { it.date }
+            if (oldest == null || (oldestSeen != null && oldest >= oldestSeen)) break
+            oldestSeen = oldest
+            edate = dayBefore(oldest)
+        }
+        return collected.values.sortedBy { it.date }.takeLast(count)
     }
 
     /**
@@ -502,4 +578,64 @@ private data class FillDto(
             price = concprc.trim().toLongOrNull() ?: return null,
             time = conctime,
         )
+}
+
+/** ETF 구성종목 한 줄. */
+@Serializable
+private data class ComponentDto(
+    @SerialName("iem_cd") val code: String = "",
+)
+
+private const val ISIN_KR_PREFIX = "KR7"
+private const val ISIN_LENGTH = 12
+private val SHORT_CODE_REGEX = Regex("^\\d{6}$")
+
+/** ISIN(KR7 로 시작하는 12자)이면 6자 단축코드로 바꾸고, 그 결과가 6자리 숫자가 아니면 버린다. */
+private fun shortCode(raw: String): String? {
+    val trimmed = raw.trim()
+    val code = if (trimmed.length == ISIN_LENGTH && trimmed.startsWith(ISIN_KR_PREFIX)) trimmed.substring(3, 9) else trimmed
+    return code.takeIf { SHORT_CODE_REGEX.matches(it) }
+}
+
+/** 액면분할·병합·주식분할·병합 */
+private val FCAM_EX_RIGHT_CODES = setOf("01", "02", "03", "04")
+
+/** 권리락·권배락·권리중간배당락·권리분기배당락 */
+private val FLNG_EX_RIGHT_CODES = setOf("01", "04", "06", "07")
+
+/** [date](YYYYMMDD, 8자리 숫자로 검증된 값만 들어온다) 의 전날. dailyBars 의 수동 페이징 전용. */
+private fun dayBefore(date: String): String =
+    LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE).minusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)
+
+private val DATE_REGEX = Regex("^\\d{8}$")
+
+/** [DATE_REGEX] 형식(8자리 숫자)이면서 실제 달력에 있는 날짜인지 — 13월처럼 자릿수만 맞는 값을 걸러낸다.
+ *  market/MarketData.kt 에도 같은 이름의 함수가 있지만 코드는 공유하지 않는다(파일별로 닫아 둔다). */
+private fun String.isCalendarDate(): Boolean =
+    DATE_REGEX.matches(this) && runCatching { LocalDate.parse(this, DateTimeFormatter.BASIC_ISO_DATE) }.isSuccess
+
+/** 일봉 한 줄. [Bar.exRight] 판정을 이 파일 안에서 끝낸다 — NH 코드값을 아는 곳은 여기뿐이다. */
+@Serializable
+private data class BarDto(
+    @SerialName("bsop_date") val date: String = "",
+    @SerialName("stck_prpr") val close: String = "",
+    @SerialName("stck_sdpr") val refPrice: String = "",
+    @SerialName("flng_cls_code") val flngCode: String = "",
+    @SerialName("fcam_mod_cls_code") val fcamCode: String = "",
+) {
+    /** 일자가 8자리 숫자가 아니거나(또는 13월처럼 자릿수만 맞을 뿐 달력에 없거나) 종가가 양의
+     *  정수가 아니면 그 날은 버린다(dayBefore() 가 빈 문자열이나 무효한 날짜를 파싱하다 죽는
+     *  일을 막는다). 기준가가 무효면 0 으로 두고 exRight 도 강제로 false 다 — 0 인 기준가가
+     *  수정주가 보정([dev.nhportfolio.market.Breadth.adjust])으로 새면 안 된다. */
+    fun toBar(): Bar? {
+        val dateValue = date.trim().takeIf { it.isCalendarDate() } ?: return null
+        val closeValue = close.trim().toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val refValue = refPrice.trim().toIntOrNull()?.takeIf { it > 0 }
+        return Bar(
+            date = dateValue,
+            close = closeValue,
+            refPrice = refValue ?: 0,
+            exRight = refValue != null && (fcamCode.trim() in FCAM_EX_RIGHT_CODES || flngCode.trim() in FLNG_EX_RIGHT_CODES),
+        )
+    }
 }

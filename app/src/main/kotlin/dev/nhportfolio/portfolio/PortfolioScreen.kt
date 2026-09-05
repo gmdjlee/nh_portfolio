@@ -61,6 +61,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.api.loadResult
+import dev.nhportfolio.market.Band
+import dev.nhportfolio.market.MarketCard
+import dev.nhportfolio.market.MarketData
+import dev.nhportfolio.market.Signal
+import dev.nhportfolio.market.SyncState
 import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
@@ -85,6 +90,9 @@ import dev.nhportfolio.ui.plColor
 import dev.nhportfolio.ui.shares
 import dev.nhportfolio.ui.userMessage
 import dev.nhportfolio.ui.weightBarWidth
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -101,9 +109,11 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
 private const val FILL_DEBOUNCE_MS = 300L
@@ -127,18 +137,42 @@ data class PortfolioUi(
     /** 현금 행에 합쳐진 현금성 자산 개수. 0 이면 순수 예수금이다. */
     val cashAssets: Int = 0,
     val cashKeys: Set<String> = emptySet(),
+    /** 시장 신호. 기준 일자는 [Signal.asOf] 로 들어 있어 따로 들고 다니지 않는다. */
+    val signal: Signal? = null,
+    /** 확보한 거래일 수. [signal] 이 null 일 때 "거래일 N" 표시에 쓴다. */
+    val signalDays: Int = 0,
+    val sync: SyncState = SyncState.Idle,
+    val marketError: String? = null,
+    /** 저장된 목표 비중 맵. [heldBp] 호출이 [plan]의 줄 순서에 기대지 않도록 그대로 들고 다닌다. */
+    val targets: Map<String, Int> = emptyMap(),
+)
+
+/**
+ * [signal]·[signalDays]·[sync]·[marketError] 를 한데 묶어 [PortfolioViewModel.ui] 의 combine 에 한 흐름으로 얹는다.
+ * [afterSyncFailure] 테스트가 값을 만들어야 하므로 파일 전용(private)이 아니라 internal 이다.
+ */
+internal data class MarketUi(
+    val signal: Signal? = null,
+    val signalDays: Int = 0,
+    val sync: SyncState = SyncState.Idle,
+    val marketError: String? = null,
 )
 
 class PortfolioViewModel(
     acctNo: String,
     private val api: NhApi,
     private val store: DataStore<Preferences>,
+    private val market: MarketData,
 ) : ViewModel() {
     private val account = Account(acctNo)
     private val targetsKey = targetsKey(acctNo)
     private val cashKey = cashKey(acctNo)
     private val kick = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val lastFill = MutableStateFlow<Fill?>(null)
+    private val marketUi = MutableStateFlow(MarketUi())
+
+    /** 갱신이 진행 중인 동안 두 번째 [syncMarket] 호출을 무시하는 데만 쓴다. */
+    private var syncJob: Job? = null
 
     // 재조회는 사용자 범위의 **모든** 체결통보가 트리거한다(토큰에 묶인 채널이라 계좌 필터가 필요 없다).
     // 계좌 매칭은 스낵바 표시에만 쓰므로 accountno 형식이 달라도 기능이 죽지 않는다.
@@ -157,6 +191,7 @@ class PortfolioViewModel(
     init {
         // 신원이 바뀌어 옛 목표는 어느 줄 것인지 알 수 없다 — 한 번 지우고 새로 잡게 한다.
         viewModelScope.launch { store.edit { clearLegacyKeys(it, acctNo) } }
+        viewModelScope.launch { reloadMarket() }
     }
 
     val ui: StateFlow<PortfolioUi> =
@@ -165,7 +200,8 @@ class PortfolioViewModel(
             store.data.map { readTargets(it, targetsKey) }.catch { },
             store.data.map { readCashCodes(it, cashKey) }.catch { },
             lastFill,
-        ) { (balance, error), targets, cashKeys, fill ->
+            marketUi,
+        ) { (balance, error), targets, cashKeys, fill, market ->
             // 현금성 자산을 먼저 접어야 분모·비중·목표·매매 수량이 모두 같은 기준을 쓴다.
             val folded = balance?.let { Rebalance.foldCash(it, cashKeys) }
             PortfolioUi(
@@ -175,6 +211,11 @@ class PortfolioViewModel(
                 error = error,
                 cashAssets = balance?.holdings.orEmpty().count { it.key in cashKeys },
                 cashKeys = cashKeys,
+                signal = market.signal,
+                signalDays = market.signalDays,
+                sync = market.sync,
+                marketError = market.marketError,
+                targets = targets,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PortfolioUi())
 
@@ -237,6 +278,49 @@ class PortfolioViewModel(
     }
 
     /**
+     * 모델이 낸 주식 익스포저 목표([exposureBp])를 종목 목표에 반영한다. 예수금 목표를
+     * 100% − [exposureBp] 로 잡으면 종목끼리의 상대 비율은 그대로 두고 합계만 목표에 맞춰
+     * 비례 조정된다([withMarketTarget]).
+     */
+    fun applyMarketTarget(exposureBp: Int) {
+        edit { withMarketTarget(it, exposureBp, currentWeightsBp()) }
+    }
+
+    /** 캐시된 신호를 다시 계산한다. 파일 I/O 를 포함하므로 메인 스레드에서 돌리지 않는다. */
+    private suspend fun reloadMarket() {
+        val (signal, days) = withContext(Dispatchers.IO) { market.cached() to market.cachedDays() }
+        marketUi.value = marketUi.value.copy(signal = signal, signalDays = days)
+    }
+
+    /**
+     * 종가 캐시를 갱신한다. 이미 진행 중이면 무시한다 — 두 번째 호출이 같은 파일을 동시에
+     * 쓰게 두면 위험하다. 실패는 [PortfolioUi.marketError] 로 알리고, 취소는 그대로 다시 던진다.
+     *
+     * 흐름이 중간(종목 루프 도중의 쓰기 오류 등)에 예외를 던지면 마지막으로 받은 `Running` 이
+     * 그대로 남아 갱신 버튼이 계속 비활성 상태가 된다 — 그래서 catch 절에서 [afterSyncFailure]
+     * 로 `Idle` 로 되돌리고, 실패 직전까지 이미 기록된 종목들이 화면에 반영되도록 [reloadMarket]
+     * 을 한 번 더 부른다. `finally` 로 옮기면 안 된다 — 취소 경로에서는 이미 취소된 스코프의
+     * withContext 가 다시 던지므로 catch (Exception) 안에만 있어야 한다.
+     */
+    fun syncMarket() {
+        if (syncJob?.isActive == true) return
+        syncJob =
+            viewModelScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        market.sync().collect { state -> marketUi.value = marketUi.value.copy(sync = state, marketError = null) }
+                    }
+                    reloadMarket()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    marketUi.value = afterSyncFailure(marketUi.value, e.userMessage())
+                    reloadMarket()
+                }
+            }
+    }
+
+    /**
      * 종목을 현금성 자산으로 묶거나 되돌린다. 묶으면 평가금액이 현금에 합쳐지고
      * 보유 목록에서 빠지므로, 남아 있던 목표 비중도 함께 지운다 — 목록에 없는 종목의
      * 목표가 남으면 합계만 어긋나고 화면 어디에도 보이지 않는다.
@@ -270,6 +354,50 @@ class PortfolioViewModel(
         }
     }
 }
+
+/**
+ * 모델이 낸 주식 익스포저 목표를 종목 목표에 반영한다. 예수금 목표를 100% − [exposureBp] 로
+ * 잡으면 종목끼리의 상대 비율은 그대로 두고 합계만 목표에 맞춰 비례 조정된다([Rebalance.scaleForCash]).
+ *
+ * [exposureBp] 를 예수금 목표로 그대로 넘기는 실수(뒤집지 않는 실수)를 막으려고 이 한 줄을
+ * 따로 빼서 테스트로 못 박는다.
+ */
+internal fun withMarketTarget(
+    current: Map<String, Int>,
+    exposureBp: Int,
+    weightsBp: Map<String, Int>,
+): Map<String, Int> = Rebalance.scaleForCash(current, FULL_BP - exposureBp, weightsBp)
+
+/**
+ * 판정의 비교 대상인 유지 비중(사양 §2.3) — 마지막으로 적용한 목표다. 예수금 목표가 있으면
+ * 100% 에서 그 값을 빼고, 없으면 실제 주식 비중([Rebalance.Plan.lines] 에서 현금 행을 뺀
+ * weightBp 합)으로 대신한다. 이미 현금성 자산이 접힌(foldCash) 뒤의 plan 이므로 CMA·발행어음이
+ * 주식으로 잡히지 않는다.
+ *
+ * **이 한 줄을 실제 비중으로 바꾸면 버그다.** 실제 비중과 비교하면 드리프트만으로 검증된
+ * 것보다 두 배 가까이 자주 매매하게 된다 — 유지 비중은 어디까지나 "마지막으로 적용한 목표"다.
+ */
+internal fun heldBp(
+    targets: Map<String, Int>,
+    plan: Rebalance.Plan,
+): Pair<Int, Boolean> {
+    val cashTarget = targets[Rebalance.CASH]
+    return if (cashTarget != null) {
+        (FULL_BP - cashTarget) to true
+    } else {
+        plan.lines.filter { it.key != Rebalance.CASH }.sumOf { it.weightBp } to false
+    }
+}
+
+/**
+ * 동기화가 중간에 실패했을 때의 다음 상태. 멈춰 있던 [SyncState.Running] 을 [SyncState.Idle] 로
+ * 되돌려 갱신 버튼을 되살리고 오류 문구를 남긴다. [MarketUi.signal]·[MarketUi.signalDays] 는
+ * 손대지 않는다 — 실패 직전까지 기록된 내용을 반영하는 것은 호출부가 다시 부르는 reloadMarket() 몫이다.
+ */
+internal fun afterSyncFailure(
+    ui: MarketUi,
+    message: String,
+): MarketUi = ui.copy(sync = SyncState.Idle, marketError = message)
 
 /** 현금성 자산이 합쳐졌으면 "예수금" 이 아니라 "현금" 이다 — 이름이 내용과 어긋나면 안 된다. */
 private fun cashLabel(cashAssets: Int): String = if (cashAssets > 0) "현금" else "예수금"
@@ -322,11 +450,14 @@ fun toggleAll(
 fun PortfolioScreen(
     acctNo: String,
     onBack: () -> Unit,
+    onGuide: (Band?) -> Unit = {},
     modifier: Modifier = Modifier,
     vm: PortfolioViewModel = koinViewModel { parametersOf(acctNo) },
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    // 화면이 다시 그려질 때마다 오늘이 바뀌면 "N일 경과" 문구가 흔들린다 — 한 번 계산해 고정한다.
+    val today = remember { LocalDate.now() }
 
     // 선택은 비어도 모드는 유지한다 — selected.isNotEmpty() 로 유도하면 체결 통보로 종목이
     // 목록에서 빠질 때 편집 중에 바가 통째로 사라진다.
@@ -408,6 +539,21 @@ fun PortfolioScreen(
                             )
                         }
                         SummaryCard(plan, ui.cashAssets, balance.holdings.size) { vm.normalizeTargets() }
+                        // heldBp 가 예수금 목표 유무를 스스로 가른다 — 목표가 없으면(사용자가 아직
+                        // 안 잡았으면) 실제 비중으로 대신하고 그 사실을 카드에 알린다. targets 를
+                        // 그대로 넘겨야 plan.lines 의 줄 순서(현금 행이 마지막이라는 가정)에 기대지 않는다.
+                        MarketCard(
+                            signal = ui.signal,
+                            signalDays = ui.signalDays,
+                            heldBp = heldBp(ui.targets, plan),
+                            actualBp = plan.lines.filter { it.key != Rebalance.CASH }.sumOf { it.weightBp },
+                            sync = ui.sync,
+                            marketError = ui.marketError,
+                            today = today,
+                            onSync = vm::syncMarket,
+                            onApply = vm::applyMarketTarget,
+                            onGuide = onGuide,
+                        )
                         HoldingsList(
                             balance = balance,
                             plan = plan,

@@ -26,7 +26,7 @@ style:
     maxLineLength: 140
   ForbiddenImport:
     active: true
-    includes: ['**/model/**', '**/portfolio/Rebalance.kt']
+    includes: ['**/model/**', '**/portfolio/Rebalance.kt', '**/market/Breadth.kt']
     imports:
       - 'android.*'
       - 'androidx.*'

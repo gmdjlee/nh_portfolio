@@ -15,6 +15,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import dev.nhportfolio.accounts.AccountsViewModel
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.lock.LockViewModel
+import dev.nhportfolio.market.MarketData
 import dev.nhportfolio.portfolio.PortfolioViewModel
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
@@ -24,6 +25,7 @@ import org.koin.core.context.startKoin
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
+import java.io.File
 
 /** 백그라운드에 이만큼 머물렀다 돌아오면 잠근다. */
 private const val LOCK_AFTER_MS = 60_000L
@@ -48,11 +50,12 @@ val appModule =
         }
         single { Biometric(get(), get()) }
         single { NhApi(get()) }
+        single { MarketData(get(), File(androidContext().filesDir, "market")) }
 
         viewModelOf(::LockViewModel)
         viewModelOf(::AccountsViewModel)
         viewModelOf(::SettingsViewModel)
-        viewModel { (acctNo: String) -> PortfolioViewModel(acctNo, get(), get()) }
+        viewModel { (acctNo: String) -> PortfolioViewModel(acctNo, get(), get(), get()) }
     }
 
 class App : Application() {
