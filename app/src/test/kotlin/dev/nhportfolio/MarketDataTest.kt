@@ -5,7 +5,9 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.emptyPreferences
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.api.NhException
+import dev.nhportfolio.market.Band
 import dev.nhportfolio.market.MarketData
+import dev.nhportfolio.market.Signal
 import dev.nhportfolio.market.SyncState
 import dev.nhportfolio.security.Vault
 import io.ktor.client.engine.mock.MockEngine
@@ -82,6 +84,20 @@ private fun writeBars(
     val exJson = ex.entries.joinToString(",") { "\"${it.key}\":${it.value}" }
     File(dir, "bars/$code.json").writeText(
         """{"dates":[${dates.joinToString(",") { "\"$it\"" }}],"closes":[${closes.joinToString(",")}],"ex":{$exJson}}""",
+    )
+}
+
+/** `index/069500.json` 을 직접 쓴다. 이미 최신 지수 파일을 깔아 두면 그 시나리오의 동기화
+ *  요청 수 계산에 지수가 끼어들지 않는다 — sync() 는 종목처럼 지수도 매번 자기 파일의
+ *  최신 여부만 따로 보기 때문이다. */
+private fun writeIndexBars(
+    dir: File,
+    dates: List<String>,
+    closes: List<Int>,
+) {
+    File(dir, "index").mkdirs()
+    File(dir, "index/069500.json").writeText(
+        """{"dates":[${dates.joinToString(",") { "\"$it\"" }}],"closes":[${closes.joinToString(",")}],"ex":{}}""",
     )
 }
 
@@ -186,7 +202,25 @@ private class MdFixture {
     fun periodRequests() = requests.count { it.url.encodedPath.endsWith("/period") }
 
     fun etfRequests() = requests.count { it.url.encodedPath.endsWith("/etfComponents") }
+
+    /** iem_cd 로 특정 종목(또는 지수)의 /period 요청 바디를 찾는다 — 동시 처리라 순서가
+     *  보장되지 않는 테스트에서 "이 종목이 어떤 조건으로 요청됐는가"를 이름으로 짚어 검증한다. */
+    fun periodBody(code: String): String =
+        (
+            requests
+                .first {
+                    it.url.encodedPath.endsWith("/period") && "\"iem_cd\":\"$code\"" in (it.body as TextContent).text
+                }.body as TextContent
+        ).text
 }
+
+/** track.json 검증용 표본 신호. 필드값은 사양 §4.1 예시와 같다. */
+private fun sampleSignal(
+    asOf: String = "20260904",
+    targetBp: Int = 2_500,
+    band: Band = Band.DEFENSE,
+    score: Double = 0.3125,
+) = Signal(targetBp = targetBp, band = band, breadth = 0.415, pctile = 0.099, window = 756, asOf = asOf, score = score)
 
 class MarketDataTest {
     // ---- cached() / cachedDays() : 파일시스템만, 네트워크 없음 ----
@@ -300,15 +334,21 @@ class MarketDataTest {
             val states = f.market.sync().toList()
 
             assertEquals(1, f.etfRequests())
-            assertEquals(codes.size, f.periodRequests())
+            // 지수(069500) 도 종목처럼 한 번 더 받는다 — 캐시가 없어 최초 백필 대상이 된다.
+            assertEquals(codes.size + 1, f.periodRequests())
             // 종목은 동시에(최대 4개 lane) 처리되므로 완료 순서는 보장되지 않는다 — 개수·집합으로만 검증한다.
-            assertEquals(SyncState.Running(0, 3), states.first(), "첫 상태는 항상 유니버스 확정 직후다")
+            assertEquals(SyncState.Running(0, 4), states.first(), "total 은 종목 수 + 지수 1 이다")
             assertEquals(SyncState.Done(0), states.last(), "마지막 상태는 항상 완료다")
-            assertEquals(5, states.size, "초기 1 + 종목 3 + 완료 1")
+            assertEquals(6, states.size, "초기 1 + 종목 3 + 지수 1 + 완료 1")
             val doneValues = states.subList(1, states.size - 1).map { (it as SyncState.Running).done }.toSet()
-            assertEquals(setOf(1, 2, 3), doneValues, "종목마다 정확히 한 번씩, 1..3 이 모두 나와야 한다")
-            val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
-            assertTrue("\"array_cnt\":\"6\"" in body, body) // 어제까지 있었으니 gap(1)+여유(5)
+            assertEquals(setOf(1, 2, 3, 4), doneValues, "종목·지수마다 정확히 한 번씩, 1..4 가 모두 나와야 한다")
+            codes.forEach { code ->
+                assertTrue("\"array_cnt\":\"6\"" in f.periodBody(code), f.periodBody(code)) // 어제까지 있었으니 gap(1)+여유(5)
+            }
+            assertTrue(
+                "\"array_cnt\":\"1100\"" in f.periodBody("069500"),
+                "지수는 캐시가 없는 최초 백필이라 종목과 다른 건수를 요청해야 한다: ${f.periodBody("069500")}",
+            )
         }
 
     @Test
@@ -399,7 +439,7 @@ class MarketDataTest {
             val states = f.market.sync().toList()
 
             assertEquals(1, f.etfRequests())
-            assertEquals(SyncState.Running(0, 2), states.first(), "빈 응답이면 캐시된 2개 목록으로 계속 진행해야 한다")
+            assertEquals(SyncState.Running(0, 3), states.first(), "빈 응답이면 캐시된 2개 목록 + 지수 1로 계속 진행해야 한다")
             assertEquals(SyncState.Done(0), states.last())
             assertTrue(File(f.dir, "bars/$codeA.json").exists(), "빈 응답이 캐시된 종목의 봉 파일을 지우면 안 된다")
             assertTrue(File(f.dir, "bars/$codeB.json").exists())
@@ -449,6 +489,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today, codes = listOf(code))
             writeUpStock(f.dir, code, listOf(today)) // 오늘까지 있으니 종목 요청도 없다
+            writeIndexBars(f.dir, listOf(today), listOf(10_000)) // 지수도 오늘까지 있어야 요청이 안 생긴다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
@@ -469,12 +510,13 @@ class MarketDataTest {
             writeUniverse(f.dir, at = today, codes = listOf(fresh, corrupt))
             writeUpStock(f.dir, fresh, listOf(today))
             writeCorrupt(f.dir, corrupt)
+            writeIndexBars(f.dir, listOf(today), listOf(10_000)) // 지수도 신선해야 손상 종목 하나로 고립된다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
             f.market.sync().toList()
 
-            assertEquals(1, f.periodRequests(), "신선한 종목은 건너뛰고 손상된 종목만 요청해야 한다")
+            assertEquals(1, f.periodRequests(), "신선한 종목·지수는 건너뛰고 손상된 종목만 요청해야 한다")
             val body = (f.requests.last { it.url.encodedPath.endsWith("/period") }.body as TextContent).text
             assertTrue("\"iem_cd\":\"$corrupt\"" in body, body)
             assertTrue("\"array_cnt\":\"1100\"" in body, "캐시 없는(손상=없음) 종목은 최초 백필 건수를 요청해야 한다: $body")
@@ -489,6 +531,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today, codes = listOf(code))
             writeBars(f.dir, code, dates = listOf("garbage"), closes = listOf(100))
+            writeIndexBars(f.dir, listOf(today), listOf(10_000)) // 지수도 신선해야 손상 종목 하나로 고립된다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
@@ -513,6 +556,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today, codes = listOf(code))
             writeBars(f.dir, code, dates = listOf("20261332"), closes = listOf(100))
+            writeIndexBars(f.dir, listOf(today), listOf(10_000)) // 지수도 신선해야 손상 종목 하나로 고립된다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
@@ -535,6 +579,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today, codes = listOf(code))
             writeBars(f.dir, code, dates = listOf("20260101", "20260102"), closes = listOf(0, 100))
+            writeIndexBars(f.dir, listOf(today), listOf(10_000)) // 지수도 신선해야 손상 종목 하나로 고립된다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
@@ -554,6 +599,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today.format(FMT), codes = listOf(code))
             writeUpStock(f.dir, code, listOf(today.plusDays(10).format(FMT)))
+            writeIndexBars(f.dir, listOf(today.format(FMT)), listOf(10_000)) // 지수도 신선해야 종목 하나로 고립된다
 
             f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
 
@@ -587,8 +633,9 @@ class MarketDataTest {
                 if (req.url.encodedPath == "/oauth2/token") {
                     json(TOKEN_BODY)
                 } else {
-                    // 이 테스트의 /period 요청은 EXR 갱신 하나뿐이다(baseline 은 이미 오늘 날짜라
-                    // 건너뛴다). 새로 받는 구간도 권리락 없이 10000원 그대로다.
+                    // 이 테스트의 /period 요청은 EXR 갱신과 지수(069500) 최초 백필, 둘이다(baseline 은
+                    // 이미 오늘 날짜라 건너뛴다). 이 핸들러는 요청 바디의 array_cnt·edate 만 보고 응답을
+                    // 만들므로 어느 쪽이 와도 그대로 처리된다. 새로 받는 구간도 권리락 없이 10000원 그대로다.
                     val input =
                         Json
                             .parseToJsonElement((req.body as TextContent).text)
@@ -629,6 +676,7 @@ class MarketDataTest {
             val code = "111111"
             writeUniverse(f.dir, at = today.minusDays(91).format(FMT), codes = listOf(code))
             writeUpStock(f.dir, code, listOf(today.minusDays(1).format(FMT))) // 오늘분 갱신이 필요하다
+            writeIndexBars(f.dir, listOf(today.format(FMT)), listOf(10_000)) // 지수도 신선해야 종목 하나로 고립된다
 
             f.handle = { req ->
                 when {
@@ -695,7 +743,7 @@ class MarketDataTest {
             f.market.sync().toList()
 
             assertEquals(4, maxInFlight.get(), "SYNC_LANES(4) 를 넘는 동시 요청이 있으면 안 된다")
-            assertEquals(8, f.periodRequests())
+            assertEquals(9, f.periodRequests(), "종목 8 + 지수 1")
         }
 
     @Test
@@ -727,4 +775,239 @@ class MarketDataTest {
             }
             assertFalse(File(f.dir, "bars/$failCode.json").exists())
         }
+}
+
+/**
+ * [MarketDataTest] 와 같은 파일의 고정구(MdFixture·writeIndexBars·sampleSignal 등)를 그대로
+ * 쓰는 별도 클래스다. 069500 지수 동기화·record()·trackData() 테스트까지 한 클래스에 모으면
+ * detekt `LargeClass` 에 걸릴 만큼 커져서, 순수 종목 캐시(sync/cached)와 이번 태스크에서
+ * 추가된 지수·관측 기록 책임을 클래스 단위로 나눴다.
+ */
+class MarketDataTrackTest {
+    // ---- sync() : 지수 대용(069500) ----
+
+    @Test
+    fun `sync은 069500을 index 파일에 BarsFile 형식으로 쓰고 bars에는 남기지 않는다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now()
+            val codes = listOf("111111", "222222")
+            val history = dateSeq(400, today.minusDays(400))
+            codes.forEach { writeUpStock(f.dir, it, history) }
+            writeUniverse(f.dir, at = today.format(FMT), codes = codes)
+
+            f.handle = { req -> if (req.url.encodedPath == "/oauth2/token") json(TOKEN_BODY) else periodResponse(req) }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(SyncState.Running(0, codes.size + 1), states.first(), "total 은 종목 수 + 지수 1 이다")
+            val indexJson = File(f.dir, "index/069500.json").readText()
+            assertTrue("\"dates\"" in indexJson && "\"closes\"" in indexJson, indexJson)
+            assertFalse(File(f.dir, "bars/069500.json").exists(), "지수가 bars/ 에 섞이면 안 된다")
+        }
+
+    @Test
+    fun `지수 동기화가 실패해도 종목은 저장되고 실패 수에 반영된다`() =
+        runTest {
+            val f = MdFixture()
+            f.ready()
+            val today = LocalDate.now().format(FMT)
+            val code = "111111"
+            writeUniverse(f.dir, at = today, codes = listOf(code))
+            writeUpStock(f.dir, code, listOf(today)) // 종목은 이미 최신이라 실패를 지수 하나로 고립한다
+
+            f.handle = { req ->
+                val text = (req.body as? TextContent)?.text.orEmpty()
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
+                    "\"iem_cd\":\"069500\"" in text -> json("""{"rsp_cd":"40010","rsp_msg":"조회 실패"}""")
+                    else -> periodResponse(req)
+                }
+            }
+
+            val states = f.market.sync().toList()
+
+            assertEquals(SyncState.Done(1), states.last(), "지수 실패도 종목처럼 failed 에 센다")
+            assertTrue(File(f.dir, "bars/$code.json").exists(), "지수가 실패해도 종목 파일은 그대로 저장돼야 한다")
+            assertFalse(File(f.dir, "index/069500.json").exists(), "실패한 지수 요청은 파일을 남기지 않는다")
+        }
+
+    @Test
+    fun `지수 파일은 cached의 시장폭 종목 수에 섞이지 않는다`() {
+        val f = MdFixture()
+        val dates = dateSeq(500)
+        val baseline = writeBaseline(f.dir, dates) // 전부 above 라 breadth 1.0
+        writeUniverse(f.dir, at = "20200101", codes = baseline)
+        // 평평한 지수는 above 가 아니다 — 시장폭 종목 수에 잘못 섞이면 30/31 로 떨어져서 드러난다.
+        writeIndexBars(f.dir, dates, List(dates.size) { 10_000 })
+
+        val signal = assertNotNull(f.market.cached())
+        assertEquals(1.0, signal.breadth, "지수 파일이 시장폭 종목 수에 섞이면 안 된다")
+    }
+
+    // ---- record() : 관측 기록 ----
+
+    @Test
+    fun `record 첫 쓰기는 기록 파일을 만들고 한 행에 기대한 필드를 담는다`() {
+        val f = MdFixture()
+        writeUniverse(f.dir, at = "20260905", codes = listOf("A"))
+
+        f.market.record(sampleSignal(), today = "20260906")
+
+        val text = File(f.dir, "track.json").readText()
+        assertTrue("\"asOf\":\"20260904\"" in text, text)
+        assertTrue("\"computedOn\":\"20260906\"" in text, text)
+        assertTrue("\"targetBp\":2500" in text, text)
+        assertTrue("\"band\":\"DEFENSE\"" in text, text)
+        assertTrue("\"universeAt\":\"20260905\"" in text, text)
+        assertTrue("\"universeSize\":1" in text, text)
+    }
+
+    @Test
+    fun `record은 같은 날 재계산이면 기존 행을 교체한다`() {
+        val f = MdFixture()
+        f.market.record(sampleSignal(targetBp = 2_500), today = "20260906")
+
+        f.market.record(sampleSignal(targetBp = 5_000), today = "20260906")
+
+        val obs = f.market.trackData().obs
+        assertEquals(1, obs.size)
+        assertEquals(5_000, obs.first().targetBp)
+    }
+
+    @Test
+    fun `record은 다른 날 쓰인 행을 절대 바꾸지 않는다`() {
+        val f = MdFixture()
+        f.market.record(sampleSignal(targetBp = 2_500), today = "20260906")
+        val before = File(f.dir, "track.json").readText()
+
+        f.market.record(sampleSignal(targetBp = 9_999), today = "20260913") // 같은 asOf, 다른 날 재계산
+
+        assertEquals(before, File(f.dir, "track.json").readText(), "다른 날 쓰인 행은 바이트 단위로 그대로여야 한다")
+    }
+
+    @Test
+    fun `record은 같은 asOf 행의 computedOn 이 날짜가 아니면 없는 행으로 보고 교체한다`() {
+        val f = MdFixture()
+        // 손으로 고쳤거나 옛·새 스키마가 섞여 computedOn 이 날짜가 아닌 행 — 오늘과 절대
+        // 같아질 수 없으므로, 없는 행으로 보지 않으면 이 asOf 는 영영 기록되지 않는다.
+        File(f.dir, "track.json").writeText(
+            """{"rows":[{"asOf":"20260904","computedOn":"garbage","targetBp":9999,"band":"MAX_DEFENSE",""" +
+                """"score":0.9,"breadth":0.9,"pctile":0.9,"window":756,"universeAt":"20260905","universeSize":199}]}""",
+        )
+
+        f.market.record(sampleSignal(targetBp = 2_500), today = "20260906")
+
+        val obs = f.market.trackData().obs
+        assertEquals(1, obs.size)
+        assertEquals(2_500, obs.first().targetBp, "computedOn 이 날짜가 아닌 행은 없는 것으로 보고 새 값으로 교체해야 한다")
+    }
+
+    @Test
+    fun `손상된 기록 파일은 다음 record로 복구된다`() {
+        val f = MdFixture()
+        File(f.dir, "track.json").writeText("{ 이건 JSON 이 아니다")
+
+        f.market.record(sampleSignal(), today = "20260906")
+
+        val obs = f.market.trackData().obs
+        assertEquals(1, obs.size)
+        assertEquals("20260904", obs.first().asOf)
+    }
+
+    @Test
+    fun `유효하지 않은 행은 읽을 때 버려지고 유효한 행만 남는다`() {
+        val f = MdFixture()
+        File(f.dir, "track.json").writeText(
+            """
+            {"rows":[
+              {"asOf":"20260904","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":0.3125,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"20260905","universeSize":199},
+              {"asOf":"garbage","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":0.3,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"20260905","universeSize":199},
+              {"asOf":"20260905","computedOn":"20260906","targetBp":20000,"band":"DEFENSE","score":0.3,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"20260905","universeSize":199},
+              {"asOf":"20260907","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":1.5,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"20260905","universeSize":199},
+              {"asOf":"20260908","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":0.3,"breadth":0.4,"pctile":0.1,"window":-1,"universeAt":"20260905","universeSize":199},
+              {"asOf":"20260909","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":0.3,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"","universeSize":0},
+              {"asOf":"20260910","computedOn":"20260906","targetBp":2500,"band":"DEFENSE","score":0.3,"breadth":0.4,"pctile":0.1,"window":756,"universeAt":"garbage","universeSize":199}
+            ]}
+            """.trimIndent(),
+        )
+
+        val obs = f.market.trackData().obs
+
+        assertEquals(
+            setOf("20260904", "20260909"),
+            obs.map { it.asOf }.toSet(),
+            "asOf 무효·targetBp 범위 밖·score 범위 밖·window 음수·universeAt 무효 행은 모두 버려져야 한다",
+        )
+    }
+
+    // ---- trackData() ----
+
+    @Test
+    fun `trackData는 지수 파일이 없으면 index가 null이고 나머지 길이는 달력과 같다`() {
+        val f = MdFixture()
+        val dates = dateSeq(10)
+        writeUniverse(f.dir, at = "20200101", codes = listOf("A"))
+        writeUpStock(f.dir, "A", dates)
+
+        val data = f.market.trackData()
+
+        assertNull(data.market.index)
+        assertEquals(dates.size, data.market.dates.size)
+        assertEquals(dates.size, data.retro.size)
+        assertEquals(dates.size, data.market.equal.size)
+    }
+
+    @Test
+    fun `trackData는 지수를 첫 정의일 기준 1로 정규화하고 빈 날은 직전 값을 잇는다`() {
+        val f = MdFixture()
+        val dates = dateSeq(6)
+        writeUniverse(f.dir, at = "20200101", codes = listOf("A"))
+        writeUpStock(f.dir, "A", dates)
+        // day2·3·5 만 있다 — day4 는 빠져서 직전값 이어짐을 검증한다.
+        writeIndexBars(f.dir, listOf(dates[2], dates[3], dates[5]), listOf(200, 220, 240))
+
+        val data = f.market.trackData()
+
+        val idx = assertNotNull(data.market.index)
+        assertEquals(dates.size, idx.size)
+        assertEquals(dates.size, data.retro.size)
+        assertEquals(dates.size, data.market.equal.size)
+        assertTrue(idx[0].isNaN(), "첫 정의일 전은 NaN 이어야 한다")
+        assertTrue(idx[1].isNaN())
+        assertEquals(1.0, idx[2], "첫 정의일은 정확히 1.0")
+        assertEquals(220.0 / 200.0, idx[3])
+        assertEquals(220.0 / 200.0, idx[4], "지수 파일에 없는 날은 직전 값을 이어간다")
+        assertEquals(240.0 / 200.0, idx[5])
+    }
+
+    @Test
+    fun `trackData는 obs를 기록 파일에서 읽고 universeAt을 채운다`() {
+        val f = MdFixture()
+        writeUniverse(f.dir, at = "20260905", codes = listOf("A"))
+        f.market.record(sampleSignal(asOf = "20260904"), today = "20260906")
+
+        val data = f.market.trackData()
+
+        assertEquals("20260905", data.universeAt)
+        assertEquals(1, data.obs.size)
+        assertEquals("20260904", data.obs.first().asOf)
+        assertEquals(2_500, data.obs.first().targetBp)
+    }
+
+    @Test
+    fun `trackData는 유니버스가 없어도 obs는 보존하고 나머지는 빈 값이다`() {
+        val f = MdFixture()
+        f.market.record(sampleSignal(), today = "20260906") // 유니버스 없이도 기록 자체는 된다
+
+        val data = f.market.trackData()
+
+        assertEquals(emptyList<String>(), data.market.dates)
+        assertEquals(emptyList<Signal?>(), data.retro)
+        assertEquals(0, data.market.equal.size)
+        assertNull(data.market.index)
+        assertEquals("", data.universeAt)
+        assertEquals(1, data.obs.size, "관측 기록은 유니버스와 무관하게 보존된다")
+    }
 }

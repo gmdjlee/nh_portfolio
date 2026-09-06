@@ -99,15 +99,6 @@ internal fun verdictText(
     return title to detail.toString()
 }
 
-internal fun Band.label(): String =
-    when (this) {
-        Band.MAX_DEFENSE -> "최대 방어"
-        Band.DEFENSE -> "방어"
-        Band.NEUTRAL -> "중립"
-        Band.ACTIVE -> "적극"
-        Band.MAX_INVEST -> "최대 투입"
-    }
-
 /**
  * 시장 신호 카드. [heldBp] 는 (유지 비중, 예수금 목표 기준 여부) — [dev.nhportfolio.portfolio.heldBp] 가 만든다.
  * [actualBp] 는 실제 주식 비중 합(현금 제외, bp) — 계산은 화면(Rebalance)이 하고 카드는 표시만 한다.
@@ -115,6 +106,9 @@ internal fun Band.label(): String =
  * 캐시가 모자라 [signal] 이 null 이면 판정 대신 확보한 거래일 수([signalDays])를 보여준다.
  * 카드를 누르면(버튼 제외) [onGuide] 로 밴드 지침 화면을 연다 — 그 시점의 밴드([Signal.band])를
  * 같이 넘겨 지침 화면이 해당 밴드를 강조해 보여줄 수 있게 한다.
+ *
+ * [onTrack] 은 "효용성" 버튼이 부른다 — [signal] 이 null 이어도(캐시가 모자라도) 항상 눌린다,
+ * 관측이 비어 있는 경우는 효용성 화면 쪽이 처리한다.
  */
 @Composable
 internal fun MarketCard(
@@ -127,6 +121,7 @@ internal fun MarketCard(
     marketError: String?,
     today: LocalDate,
     onSync: () -> Unit,
+    onTrack: () -> Unit,
     onApply: (Int) -> Unit,
     onGuide: (Band?) -> Unit,
 ) {
@@ -142,10 +137,13 @@ internal fun MarketCard(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("시장 신호", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(
-                enabled = sync !is SyncState.Running,
-                onClick = { if (signalDays == 0) confirmBackfill = true else onSync() },
-            ) { Text(if (sync is SyncState.Running) "갱신 중…" else "갱신") }
+            Row {
+                TextButton(onClick = onTrack) { Text("효용성") }
+                TextButton(
+                    enabled = sync !is SyncState.Running,
+                    onClick = { if (signalDays == 0) confirmBackfill = true else onSync() },
+                ) { Text(if (sync is SyncState.Running) "갱신 중…" else "갱신") }
+            }
         }
 
         marketError?.let {

@@ -172,6 +172,18 @@ private val BANDS =
         ),
     )
 
+/** [band] 의 검증값 네 개. 효용성 화면(TrackScreen)의 밴드별 표가 실측과 나란히 보여준다. */
+internal data class GuideStats(
+    val vol: String,
+    val down10: String,
+    val up10: String,
+    val worst3m: String,
+)
+
+/** [BANDS] 는 다섯 밴드를 모두 담고 있어 [band] 가 무엇이든 반드시 하나를 찾는다. */
+internal fun guideStats(band: Band): GuideStats =
+    BANDS.first { it.band == band }.let { GuideStats(vol = it.vol, down10 = it.down10, up10 = it.up10, worst3m = it.worst3m) }
+
 /** 3절 "이 신호가 알려 주는 것과 알려 주지 않는 것"의 본문 세 문단. */
 private val NOT_TELLING =
     listOf(
@@ -215,11 +227,12 @@ private val NEVER_ITEMS =
     )
 
 // 검증 조건(코스피 상위 250)과 이 앱의 신호(KODEX 200 구성종목)가 다르다는 사실을 수치와 같은 자리에서 밝힌다.
-private const val FOOTER_1 =
+// internal: 효용성 화면(TrackScreen)의 각주가 같은 출처 문구를 재사용한다(중복 방지).
+internal const val FOOTER_1 =
     "관측값 출처: 2004-01-02 ~ 2026-09-04 코스피 5,597거래일 백테스트. CAGR 9.26%, 최대낙폭 −19.89%, " +
         "Sharpe 0.52, 총 재조정 64회. 거래비용 매도 0.17% / 매수 0.02% 반영. " +
         "본 화면은 정량 분석에 근거한 운영 지침이며 투자자문이 아닙니다."
-private const val FOOTER_2 =
+internal const val FOOTER_2 =
     "위 수치는 코스피 시가총액 상위 250종목으로 검증된 값입니다. " +
         "이 앱의 신호는 KODEX 200 구성종목으로 계산하므로 검증 조건과 완전히 같지 않습니다."
 
@@ -345,9 +358,12 @@ private fun StatRow(
     }
 }
 
-/** 접이식 섹션. [title] 행을 누르면 [body] 를 펼치거나 접는다 — 애니메이션 없이 조건부 컴포지션만 쓴다. */
+/**
+ * 접이식 섹션. [title] 행을 누르면 [body] 를 펼치거나 접는다 — 애니메이션 없이 조건부 컴포지션만 쓴다.
+ * internal: 효용성 화면(TrackScreen)의 "해당 없음" 원인 목록도 이 섹션을 그대로 재사용한다.
+ */
 @Composable
-private fun CollapsibleSection(
+internal fun CollapsibleSection(
     title: String,
     body: @Composable () -> Unit,
 ) {

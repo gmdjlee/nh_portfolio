@@ -70,11 +70,15 @@ import dev.nhportfolio.model.Account
 import dev.nhportfolio.model.Balance
 import dev.nhportfolio.model.Fill
 import dev.nhportfolio.model.Holding
+import dev.nhportfolio.store.appliedKey
 import dev.nhportfolio.store.cashKey
 import dev.nhportfolio.store.clearLegacyKeys
+import dev.nhportfolio.store.encodeApplied
+import dev.nhportfolio.store.readApplied
 import dev.nhportfolio.store.readCashCodes
 import dev.nhportfolio.store.readTargets
 import dev.nhportfolio.store.targetsKey
+import dev.nhportfolio.store.withApplied
 import dev.nhportfolio.ui.ChevronIcon
 import dev.nhportfolio.ui.CloseIcon
 import dev.nhportfolio.ui.DetailColors
@@ -114,6 +118,7 @@ import kotlinx.serialization.json.Json
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 private const val FILL_DEBOUNCE_MS = 300L
@@ -170,6 +175,7 @@ class PortfolioViewModel(
     private val account = Account(acctNo)
     private val targetsKey = targetsKey(acctNo)
     private val cashKey = cashKey(acctNo)
+    private val appliedKey = appliedKey(acctNo)
     private val kick = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val lastFill = MutableStateFlow<Fill?>(null)
     private val marketUi = MutableStateFlow(MarketUi())
@@ -285,14 +291,40 @@ class PortfolioViewModel(
      * 모델이 낸 주식 익스포저 목표([exposureBp])를 종목 목표에 반영한다. 예수금 목표를
      * 100% − [exposureBp] 로 잡으면 종목끼리의 상대 비율은 그대로 두고 합계만 목표에 맞춰
      * 비례 조정된다([withMarketTarget]).
+     *
+     * 목표 재기록과 적용 기록(사양 §4.2) 한 줄 추가를 같은 `store.edit` 안에서 함께 한다 —
+     * 따로 두 번의 edit 으로 나누면 그 사이에 죽었을 때 목표만 바뀌고 적용 기록은 못 남는
+     * (또는 그 반대) 불일치가 생긴다.
      */
     fun applyMarketTarget(exposureBp: Int) {
-        edit { withMarketTarget(it, exposureBp, currentWeightsBp()) }
+        val today = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+        viewModelScope.launch {
+            store.edit { prefs ->
+                prefs[targetsKey] =
+                    Json.encodeToString(withMarketTarget(readTargets(prefs, targetsKey), exposureBp, currentWeightsBp()))
+                prefs[appliedKey] = encodeApplied(withApplied(readApplied(prefs, appliedKey), today, exposureBp))
+            }
+        }
     }
 
-    /** 캐시된 신호를 다시 계산한다. 파일 I/O 를 포함하므로 메인 스레드에서 돌리지 않는다. */
+    /**
+     * 캐시된 신호를 다시 계산한다. 파일 I/O 를 포함하므로 메인 스레드에서 돌리지 않는다.
+     *
+     * 신호가 나오면 같은 IO 컨텍스트 안에서 관측 기록([MarketData.record])도 남긴다(사양
+     * §4.1) — 화면 진입마다 불리지만 같은 `asOf` 는 한 행이라 행은 거래일당 하나이고, 같은 날
+     * 다시 계산하면 그 행을 덮어쓴다. 기록은 부가 기능이라 디스크 오류로 화면이 죽으면 안 된다 — [runCatching] 으로
+     * 감싸 실패를 삼킨다.
+     */
     private suspend fun reloadMarket() {
-        val (signal, days) = withContext(Dispatchers.IO) { market.cached() to market.cachedDays() }
+        val (signal, days) =
+            withContext(Dispatchers.IO) {
+                val computed = market.cached()
+                if (computed != null) {
+                    val today = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                    runCatching { market.record(computed, today) }
+                }
+                computed to market.cachedDays()
+            }
         marketUi.value = marketUi.value.copy(signal = signal, signalDays = days)
     }
 
@@ -456,6 +488,7 @@ fun PortfolioScreen(
     acctNo: String,
     onBack: () -> Unit,
     onGuide: (Band?) -> Unit = {},
+    onTrack: () -> Unit = {},
     modifier: Modifier = Modifier,
     vm: PortfolioViewModel = koinViewModel { parametersOf(acctNo) },
 ) {
@@ -557,6 +590,7 @@ fun PortfolioScreen(
                             marketError = ui.marketError,
                             today = today,
                             onSync = vm::syncMarket,
+                            onTrack = onTrack,
                             onApply = vm::applyMarketTarget,
                             onGuide = onGuide,
                         )

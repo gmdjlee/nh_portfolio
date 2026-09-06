@@ -23,6 +23,8 @@ data class Signal(
     val pctile: Double,
     val window: Int,
     val asOf: String,
+    /** 아홉 구성을 1/8 단위로 양자화한 뒤 평균한 값(0~1). 최종 목표([targetBp])는 이 값을 한 번 더 양자화한 것이다. */
+    val score: Double,
 )
 
 /** 판정 결과. [gapBp] 는 목표 − 유지 비중(bp)이고, [action] 은 그 절댓값이 임계치를 넘었을 때의 방향이다. */
@@ -71,36 +73,63 @@ object Breadth {
     }
 
     /**
-     * 오늘의 익스포저 목표. [closes] 의 각 배열은 [dates] 와 길이가 같고, 상장 전이라 값이
-     * 없는 날은 0 이다(주가는 0 이 될 수 없으므로 안전한 빈칸이다).
+     * [dates] 와 길이가 같은 날짜별 신호. 원소 t 는 dates[t] 시점의 신호다. [closes] 의 각
+     * 배열은 [dates] 와 길이가 같고, 상장 전이라 값이 없는 날은 0 이다(주가는 0 이 될 수
+     * 없으므로 안전한 빈칸이다).
      *
-     * 200일선 상회 비율이나 그 3년 백분위조차 정의되지 않으면(관측 부족, 유효 종목 30 미만)
-     * null 을 돌려준다 — 근거 없는 숫자를 내느니 아무 숫자도 안 내는 쪽이 낫다.
+     * 200일선 상회 비율이나 그 3년 백분위, 혹은 아홉 평활 구성 중 하나라도 그 날 정의되지
+     * 않으면(관측 부족, 유효 종목 30 미만, 창 워밍업) 그 원소는 null 이다 — 근거 없는 숫자를
+     * 내느니 아무 숫자도 안 내는 쪽이 낫다. 세 이동평균 계열과 그 백분위·롤링 평활·롤링
+     * 정의 개수를 각각 전 구간에 걸쳐 한 번씩만 계산한 뒤 날짜별로 조립하므로, 전체가
+     * O(n) 한 번의 훑기로 끝난다 — 날짜를 잘라 [signal] 을 다시 부른 것과 결과가 같다.
      */
-    fun signal(
+    fun series(
         closes: Map<String, IntArray>,
         dates: List<String>,
-    ): Signal? {
-        if (dates.isEmpty()) return null
+    ): List<Signal?> {
+        if (dates.isEmpty()) return emptyList()
         val days = dates.size
         val stocks = closes.values
 
         val breadthByMa = MA_LENGTHS.associateWith { ma -> breadthSeries(stocks, days, ma) }
-        val pctileByMa = breadthByMa.mapValues { (_, series) -> pctRank(series) }
+        val pctileByMa = breadthByMa.mapValues { (_, breadth) -> pctRank(breadth) }
+        val windowByMa = MA_LENGTHS.associateWith { ma -> rollingDefinedCount(breadthByMa.getValue(ma), PCT_WIN) }
+        val smoothsByConfig = MA_LENGTHS.flatMap { ma -> SM_LENGTHS.map { sm -> rollingSmooth(pctileByMa.getValue(ma), sm) } }
+        val displayBreadth = breadthByMa.getValue(MA_DISPLAY)
+        val displayPctile = pctileByMa.getValue(MA_DISPLAY)
 
-        val breadth = breadthByMa.getValue(MA_DISPLAY).last()
+        return List(days) { t -> signalAt(t, dates, displayBreadth, displayPctile, windowByMa, smoothsByConfig) }
+    }
+
+    /** 오늘의 익스포저 목표. [series] 의 마지막 원소와 정확히 같다(빈 [dates] 는 null). */
+    fun signal(
+        closes: Map<String, IntArray>,
+        dates: List<String>,
+    ): Signal? = series(closes, dates).lastOrNull()
+
+    /** [series] 의 날짜별 조립. 날짜 [t] 하나에서 아홉 구성이 전부 정의될 때만 [Signal] 을 낸다. */
+    private fun signalAt(
+        t: Int,
+        dates: List<String>,
+        displayBreadth: DoubleArray,
+        displayPctile: DoubleArray,
+        windowByMa: Map<Int, IntArray>,
+        smoothsByConfig: List<DoubleArray>,
+    ): Signal? {
+        val breadth = displayBreadth[t]
         if (breadth.isNaN()) return null
-        val pctile = pctileByMa.getValue(MA_DISPLAY).last()
+        val pctile = displayPctile[t]
         if (pctile.isNaN()) return null
 
         // 목표는 9구성 전부의 평균이다(사양 §2 의 5) — 구성이 하나라도 아직 평활되지
         // 않았으면(창 워밍업) 부분 앙상블을 대신 내지 않고 null 이다. 원 코드는 워밍업
         // 구간을 중립값으로 채워 늘 9개를 채우는데, 이 채움을 일부러 옮기지 않았으므로
         // 대신 9개가 다 찰 때까지 기다린다.
-        val rawSmooths = MA_LENGTHS.flatMap { ma -> SM_LENGTHS.map { sm -> smoothLast(pctileByMa.getValue(ma), sm) } }
-        if (rawSmooths.any { it.isNaN() }) return null
+        val smooths = smoothsByConfig.map { it[t] }
+        if (smooths.any { it.isNaN() }) return null
 
-        val targetBp = quantize(rawSmooths)
+        val ensembleScore = score(smooths)
+        val targetBp = quantize(ensembleScore)
         return Signal(
             targetBp = targetBp,
             band = bandOf(targetBp),
@@ -108,8 +137,9 @@ object Breadth {
             pctile = pctile,
             // 세 이동평균 길이 중 창이 가장 늦게 차는 쪽이 병목이다 — 200일선만 보면
             // 250일선이 아직 부분 창인데도 756/756 으로 보여 다 찬 것처럼 속일 수 있다.
-            window = MA_LENGTHS.minOf { definedCount(breadthByMa.getValue(it), PCT_WIN) },
-            asOf = dates.last(),
+            window = MA_LENGTHS.minOf { windowByMa.getValue(it)[t] },
+            asOf = dates[t],
+            score = ensembleScore,
         )
     }
 
@@ -216,27 +246,57 @@ object Breadth {
             }
         }
 
-    /** 트레일링 창 [win] 안에 정의된(비-NaN) 관측 수. [Signal.window] 그대로다. */
-    private fun definedCount(
+    /**
+     * 트레일링 [win] 창 안에 정의된(비-NaN) 관측 수의 날짜별 시계열 — [Signal.window] 의
+     * 재료다. 이동개수를 유지해 날짜당 O(1)로 갱신한다(위 [accumulate] 와 같은 요령).
+     */
+    private fun rollingDefinedCount(
         values: DoubleArray,
         win: Int,
-    ): Int {
-        val from = maxOf(0, values.size - win)
-        return (from until values.size).count { !values[it].isNaN() }
+    ): IntArray {
+        val out = IntArray(values.size)
+        var count = 0
+        for (t in values.indices) {
+            if (!values[t].isNaN()) count++
+            if (t >= win && !values[t - win].isNaN()) count--
+            out[t] = count
+        }
+        return out
     }
 
-    /** 최근 [sm] 개 백분위의 평균. 그 [sm] 개가 전부 정의되어 있을 때만 정의된다. */
-    private fun smoothLast(
-        series: DoubleArray,
+    /**
+     * [values] 의 트레일링 [sm]-일 평균 시계열. 창 안에 NaN 이 하나라도 있으면 그 날은
+     * NaN 이다. 정의 여부는 창 안의 NaN 개수를 이동개수로 유지해 O(1)에 판단하지만, 합
+     * 자체는 그 창의 [sm] 개를 인덱스 오름차순으로 매번 0.0 부터 새로 더한다(옛
+     * smoothLast 와 같은 순서 — [windowMean] 참고). 이동합에서 빠지는 값을 빼는 식으로
+     * 구하면 부동소수점 가산에 결합법칙이 없어 같은 결과를 보장하지 못하고, 평활값은
+     * 그 뒤 [roundToEighth] 의 반올림 동점(짝수로) 판정을 거치므로 백분위처럼 분모가
+     * 2n 인 유리수에서 실제로 동점에 걸린다 — 그 미세한 차이가 동점을 한쪽으로 밀면
+     * targetBp 가 1250bp 어긋날 수 있다. sm 은 최대 60 인 상수라 창을 다시 더해도
+     * 전체는 여전히 O(n) 이다.
+     */
+    internal fun rollingSmooth(
+        values: DoubleArray,
+        sm: Int,
+    ): DoubleArray {
+        val out = DoubleArray(values.size)
+        var nanCount = 0
+        for (t in values.indices) {
+            if (values[t].isNaN()) nanCount++
+            if (t >= sm && values[t - sm].isNaN()) nanCount--
+            out[t] = if (t >= sm - 1 && nanCount == 0) windowMean(values, t, sm) else Double.NaN
+        }
+        return out
+    }
+
+    /** [t] 에서 끝나는 길이 [sm] 창의 평균. 옛 smoothLast 와 같은 오름차순으로 매번 0.0 부터 새로 더한다. */
+    private fun windowMean(
+        values: DoubleArray,
+        t: Int,
         sm: Int,
     ): Double {
-        if (series.size < sm) return Double.NaN
         var sum = 0.0
-        for (i in series.size - sm until series.size) {
-            val v = series[i]
-            if (v.isNaN()) return Double.NaN
-            sum += v
-        }
+        for (i in t - sm + 1..t) sum += values[i]
         return sum / sm
     }
 
@@ -246,9 +306,19 @@ object Breadth {
     internal fun quantize(x: Double): Int = round(roundToEighth(x) * FULL_BP).toInt()
 
     /**
-     * 앙상블 양자화 — **두 번** 일어난다. [smooths] 각각을 먼저 1250bp 단위로 반올림하고,
-     * 그 평균을 낸 뒤 다시 반올림한다. 평활값을 바로 평균해 한 번만 반올림하면 결과가
-     * 달라진다(예: 5개 0.19 + 4개 0.17 은 두 번 양자화하면 2500bp, 한 번만 하면 1250bp).
+     * 아홉 구성을 1/8 단위로 먼저 반올림한 뒤 평균한 값(0~1) — [Signal.score] 그대로다.
+     * 평활값을 반올림 없이 바로 평균하면(양자화가 한 번으로 끝나면) 아래 [quantize] 의
+     * 결과가 달라진다.
      */
-    internal fun quantize(smooths: List<Double>): Int = quantize(smooths.map(::roundToEighth).average())
+    internal fun score(smooths: List<Double>): Double = smooths.map(::roundToEighth).average()
 }
+
+/** 밴드의 한국어 표시명. 화면(MarketCard·BandGuideScreen·Track 의 표본 부족 진단)이 공유해 쓴다. */
+internal fun Band.label(): String =
+    when (this) {
+        Band.MAX_DEFENSE -> "최대 방어"
+        Band.DEFENSE -> "방어"
+        Band.NEUTRAL -> "중립"
+        Band.ACTIVE -> "적극"
+        Band.MAX_INVEST -> "최대 투입"
+    }

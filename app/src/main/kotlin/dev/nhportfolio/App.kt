@@ -16,6 +16,7 @@ import dev.nhportfolio.accounts.AccountsViewModel
 import dev.nhportfolio.api.NhApi
 import dev.nhportfolio.lock.LockViewModel
 import dev.nhportfolio.market.MarketData
+import dev.nhportfolio.market.TrackViewModel
 import dev.nhportfolio.portfolio.PortfolioViewModel
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
@@ -56,6 +57,7 @@ val appModule =
         viewModelOf(::AccountsViewModel)
         viewModelOf(::SettingsViewModel)
         viewModel { (acctNo: String) -> PortfolioViewModel(acctNo, get(), get(), get()) }
+        viewModel { (acctNo: String) -> TrackViewModel(acctNo, get(), get()) }
     }
 
 class App : Application() {
