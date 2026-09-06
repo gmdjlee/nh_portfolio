@@ -23,7 +23,7 @@ private fun signal(
     targetBp: Int,
     window: Int = Breadth.PCT_WIN,
     asOf: String = "20260101",
-) = Signal(targetBp = targetBp, band = Breadth.bandOf(targetBp), breadth = 0.0, pctile = 0.0, window = window, asOf = asOf)
+) = Signal(targetBp = targetBp, band = Breadth.bandOf(targetBp), breadth = 0.0, pctile = 0.0, window = window, asOf = asOf, score = 0.0)
 
 private fun line(
     key: String,

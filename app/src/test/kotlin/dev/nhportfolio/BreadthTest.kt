@@ -210,6 +210,22 @@ class BreadthTest {
         assertEquals(7_500, Breadth.quantize(List(9) { 0.80 }))
     }
 
+    /**
+     * 사양이 요구하는 "두 번 양자화" 를 [Breadth.score] 로 직접 확인한다: 0.19 다섯 개와
+     * 0.17 네 개는 각각 1/8 로 반올림하면 0.25·0.125 가 되고, 그 평균(score)은
+     * 1.75/9 ≈ 0.19444 다. score 를 반올림 없이 바로 평균만 냈다면 0.1811 이 나와 다시
+     * 양자화해도 1250bp 인데, 두 번 양자화하면 2500bp 로 갈린다.
+     */
+    @Test
+    fun `score 는 반올림한 평활값의 평균이고 targetBp 는 그 score 를 다시 양자화한 값이다`() {
+        val smooths = List(5) { 0.19 } + List(4) { 0.17 }
+        val score = Breadth.score(smooths)
+
+        assertEquals(1.75 / 9, score)
+        assertEquals(2_500, Breadth.quantize(score))
+        assertEquals(Breadth.quantize(smooths), Breadth.quantize(score))
+    }
+
     // ---- 밴드 ----
 
     @Test
@@ -262,5 +278,76 @@ class BreadthTest {
         val stocks = universe(stockCount = 35, days = days, seed = 99)
         val signal = assertNotNull(Breadth.signal(stocks, labels(days)))
         assertEquals(7_500, signal.targetBp)
+    }
+
+    // ---- series (날짜별 신호) ----
+
+    /**
+     * [Breadth.series] 는 전 구간을 한 번에 훑어 계산하고, [Breadth.signal] 은 그 날짜까지만
+     * 자른 데이터로 매번 다시 계산한다 — 이 둘이 임의의 인덱스에서 같아야 한 번의 훑기가
+     * 옳다는 증거가 된다. 배열을 잘라 넘기므로 breadthSeries·pctRank 가 미래를 보지 않는다는
+     * 인과성도 같이 확인하는 셈이다.
+     */
+    @Test
+    fun `series 의 원소 t 는 그 날짜까지 자른 데이터로 signal 을 다시 부른 것과 같다`() {
+        val days = 1_200
+        val stocks = universe(stockCount = 40, days = days, seed = 33)
+        val dates = labels(days)
+        val full = Breadth.series(stocks, dates)
+        assertEquals(days, full.size)
+
+        for (i in listOf(1_064, 1_100, 1_150, 1_199)) {
+            val truncated = stocks.mapValues { it.value.copyOfRange(0, i + 1) }
+            assertEquals(Breadth.signal(truncated, dates.take(i + 1)), full[i], "인덱스 $i 에서 series 와 signal 이 다르다")
+        }
+    }
+
+    /**
+     * 9구성이 전부 정의되는 최소 일수는 497일(0-idx 496)이다 — 위 "9구성이 전부 정의되는
+     * 최소 일수" 테스트와 같은 경계다. 워밍업 구간은 전부 null 이어야 하고, 클린한
+     * 유니버스라 그 경계를 넘으면 이후로 결측 없이 계속 정의돼야 한다.
+     */
+    @Test
+    fun `워밍업 구간은 null 이고 9구성이 다 차는 날부터는 끝까지 정의된다`() {
+        val days = 600
+        val stocks = universe(stockCount = 30, days = days, seed = 44)
+        val series = Breadth.series(stocks, labels(days))
+
+        assertEquals(days, series.size)
+        for (t in 0 until 496) assertNull(series[t], "인덱스 $t 는 워밍업 구간이라 null 이어야 한다")
+        for (t in 496 until days) assertNotNull(series[t], "인덱스 $t 는 정의 구간인데 null 이다")
+    }
+
+    @Test
+    fun `정의된 모든 원소에서 score 는 0 과 1 사이이고 targetBp 는 quantize(score) 와 같다`() {
+        val days = 700
+        val stocks = universe(stockCount = 35, days = days, seed = 55)
+        val series = Breadth.series(stocks, labels(days))
+
+        for (signal in series.filterNotNull()) {
+            assertTrue(signal.score in 0.0..1.0, "score=${signal.score} 는 [0,1] 을 벗어난다")
+            assertEquals(Breadth.quantize(signal.score), signal.targetBp)
+        }
+    }
+
+    /**
+     * window 는 756 창이 다 찰 때까지 늘기만 하고(756 을 넘지 않고), 다 찬 뒤에는 756 을
+     * 유지한다. 세 이동평균 중 창이 가장 늦게 차는 (ma=250, 워밍업 경계 t=186) 이
+     * t = 186 + 756 - 1 = 941(0-idx)에서야 756 에 닿으므로, 그 뒤로도 한참 더 지켜보도록
+     * 1100일을 쓴다.
+     */
+    @Test
+    fun `window 는 756 에 닿을 때까지 단조 증가하고 그 뒤로는 756 을 유지한다`() {
+        val days = 1_100
+        val stocks = universe(stockCount = 30, days = days, seed = 66)
+        val series = Breadth.series(stocks, labels(days))
+
+        var prev = 0
+        for (signal in series.filterNotNull()) {
+            assertTrue(signal.window in prev..Breadth.PCT_WIN, "window 가 감소했거나 756 을 넘었다: $prev -> ${signal.window}")
+            prev = signal.window
+        }
+        val last = assertNotNull(series.last())
+        assertEquals(Breadth.PCT_WIN, last.window)
     }
 }
