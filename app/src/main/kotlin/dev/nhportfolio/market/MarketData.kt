@@ -20,6 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger
 /** 유니버스 조달 경로 — 코스피200 ETF 구성종목. krstock 에 랭킹 API가 없어 이 ETF 를 대신 쓴다. */
 private const val KODEX200 = "069500"
 
+/** 시장 대용 지수 — 같은 069500 을 이번엔 유니버스 원천이 아니라 "시장이 어떻게 움직였는가"의
+ *  대용 종가로 받는다(사양 §4.3). 코스피 원계열이 NH 에 없어 이 ETF 값으로 대신한다. */
+private const val INDEX_CODE = "069500"
+
 /** 캐시가 없는 종목의 최초 백필 일수. */
 private const val BACKFILL_DAYS = 1100
 
@@ -32,6 +36,9 @@ private const val GAP_MARGIN_DAYS = 5
 /** 동시에 갱신할 종목 수. 요청 간격은 [NhApi] 의 전역 게이트가 지키므로 여기서는 동시
  *  개수만 제한하면 된다(합산 속도는 여전히 초당 요청 제한 아래로 묶인다). */
 private const val SYNC_LANES = 4
+
+/** `track.json` 행 검증에 쓰는 목표 비중 상한(bp). 하한은 0. */
+private const val FULL_BP = 10_000
 
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 private val DATE_REGEX = Regex("^\\d{8}$")
@@ -67,10 +74,45 @@ private data class BarsFile(
     val ex: Map<String, Int> = emptyMap(),
 )
 
+/** `dir/track.json` 행 하나(사양 §4.1). [band] 는 [Band] 이름 문자열로 저장한다 — 다시 읽을 때
+ *  [Obs] 로는 옮기지 않지만(판정은 모델 자신의 규칙으로 재구성한다, 사양 §4.1) 기록 자체는 남긴다. */
+@Serializable
+private data class TrackRow(
+    val asOf: String,
+    val computedOn: String,
+    val targetBp: Int,
+    val band: String,
+    val score: Double,
+    val breadth: Double,
+    val pctile: Double,
+    val window: Int,
+    val universeAt: String,
+    val universeSize: Int,
+)
+
+/** `dir/track.json` 전체. */
+@Serializable
+private data class TrackFile(
+    val rows: List<TrackRow> = emptyList(),
+)
+
+/**
+ * 화면이 필요로 하는 모든 것. 캐시를 한 번만 읽는다. [universeAt] 은 `universe.json` 의 `at`
+ * ("" 는 유니버스가 없다는 뜻)이다 — 소급 모드에서 화면이 [Signal] 을 [Obs] 로 바꿀 때
+ * `universeAt` 자리를 이 값으로 채운다(사양 §4.5, "오늘의 유니버스 기준" 라벨의 근거).
+ */
+data class TrackData(
+    val market: Market,
+    val retro: List<Signal?>,
+    val obs: List<Obs>,
+    val universeAt: String,
+)
+
 /**
  * 종가 캐시와 동기화. 저장은 종목당 파일 하나다(컨트롤러 판단) — 200종목 백필 도중 죽어도
  * 그 순간 쓰던 파일 하나만 위험하고 나머지는 멀쩡해서, 재개·부분실패·손상 격리가 전부 공짜다.
- * [dir] 는 캐시 루트: `dir/universe.json` 과 `dir/bars/<code>.json` 을 둔다.
+ * [dir] 는 캐시 루트: `dir/universe.json`, `dir/bars/<code>.json`, `dir/index/069500.json`
+ * (시장 대용 지수, 사양 §4.3), `dir/track.json`(관측 기록, 사양 §4.1) 을 둔다.
  */
 class MarketData(
     private val api: NhApi,
@@ -86,6 +128,35 @@ class MarketData(
 
     /** 확보한 거래일 수. 신호가 null 일 때 "거래일 N, 최소 약 500일" 표시에 쓴다. */
     fun cachedDays(): Int = loadCalendar().first.size
+
+    /**
+     * 효용성 화면이 필요로 하는 모든 것을 한 번에 만든다. [cached] 와 마찬가지로 파일을
+     * 읽으므로 호출부(뷰모델)가 메인 스레드가 아닌 곳에서 불러야 한다.
+     *
+     * **정렬 계약**: 이 함수 안에서 [loadCalendar] 를 딱 한 번만 불러 그 결과(달력·종가)
+     * 하나로 [Market.dates]·[Market.equal]·[retro] 를 모두 만든다 — 셋의 길이는 항상
+     * `market.dates.size` 로 같다. [Market.index] 도 null 이 아니면 마찬가지 길이다 —
+     * 화면은 세 배열을 같은 인덱스로 나란히 읽을 수 있다는 뜻이다. 유니버스가 없으면
+     * [loadCalendar] 가 빈 달력을 주므로 [Market.dates]·[retro]·[Market.equal] 은 모두
+     * 비고 [Market.index] 는 null 이다 — 그래도 관측 기록([obs])만은 유니버스와 무관하게
+     * 그대로 돌려준다.
+     */
+    fun trackData(): TrackData {
+        val (calendar, closes) = loadCalendar()
+        val universe = readJson<UniverseFile>(universeFile())
+        val market =
+            Market(
+                dates = calendar,
+                index = alignedIndex(calendar),
+                equal = Track.equalWeight(closes, calendar.size),
+            )
+        return TrackData(
+            market = market,
+            retro = Breadth.series(closes, calendar),
+            obs = readObs(),
+            universeAt = universe?.at.orEmpty(),
+        )
+    }
 
     /**
      * 유니버스와 종가를 갱신한다. 진행률을 흘리고, 끝나면 새 신호를 돌려준다(콜드 플로우).
@@ -121,31 +192,20 @@ class MarketData(
                     cachedUniverse.codes
                 }
 
-            send(SyncState.Running(0, codes.size))
+            // 지수 대용(069500) 은 종목과 같은 방식으로 받되 index/ 에 따로 쓴다 — universe.codes 에는
+            // 절대 섞지 않는다(시장폭 종목 수·유니버스 교체 시 삭제 대상 목록이 모두 그 목록만 본다).
+            val targets = codes.map { it to barsFile(it) } + (INDEX_CODE to indexFile())
+            send(SyncState.Running(0, targets.size))
 
             val done = AtomicInteger(0)
             val failed = AtomicInteger(0)
             val gate = Semaphore(SYNC_LANES)
             coroutineScope {
-                codes.forEach { code ->
+                targets.forEach { (code, file) ->
                     launch {
                         gate.withPermit {
-                            val existing = readBars(code)
-                            val lastDate = existing?.dates?.lastOrNull()
-                            if (lastDate != today) {
-                                val count =
-                                    if (lastDate == null) {
-                                        BACKFILL_DAYS
-                                    } else {
-                                        // coerceIn 하한 1 — 기기 시계가 과거로 돌아가 lastDate 가 today 보다
-                                        // 미래로 남아 있으면 daysBetween 이 음수라 count 가 0 이하로 떨어질 수 있다.
-                                        (daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS).coerceIn(1, BACKFILL_DAYS)
-                                    }
-                                loadResult { api.dailyBars(code, count) }
-                                    .onSuccess { bars -> writeJson(barsFile(code), merge(existing, bars)) }
-                                    .onFailure { failed.incrementAndGet() }
-                            }
-                            send(SyncState.Running(done.incrementAndGet(), codes.size))
+                            if (!syncFile(code, file, today)) failed.incrementAndGet()
+                            send(SyncState.Running(done.incrementAndGet(), targets.size))
                         }
                     }
                 }
@@ -154,9 +214,73 @@ class MarketData(
             send(SyncState.Done(failed.get()))
         }
 
+    /**
+     * 종목(또는 지수) 하나의 캐시를 오늘 날짜까지 채운다. 이미 오늘 것까지 있으면 통신하지
+     * 않는다. [file] 을 받아 종목(`bars/`)과 지수(`index/`) 양쪽에서 그대로 재사용한다 —
+     * sync() 의 순환복잡도를 낮추려 몸통만 뺀 것이고 새 책임은 없다. 실패하면 false.
+     */
+    private suspend fun syncFile(
+        code: String,
+        file: File,
+        today: String,
+    ): Boolean {
+        val existing = readBars(file)
+        val lastDate = existing?.dates?.lastOrNull()
+        if (lastDate == today) return true
+        val count =
+            if (lastDate == null) {
+                BACKFILL_DAYS
+            } else {
+                // coerceIn 하한 1 — 기기 시계가 과거로 돌아가 lastDate 가 today 보다 미래로
+                // 남아 있으면 daysBetween 이 음수라 count 가 0 이하로 떨어질 수 있다.
+                (daysBetween(lastDate, today).toInt() + GAP_MARGIN_DAYS).coerceIn(1, BACKFILL_DAYS)
+            }
+        return loadResult { api.dailyBars(code, count) }
+            .onSuccess { bars -> writeJson(file, merge(existing, bars)) }
+            .isSuccess
+    }
+
+    /**
+     * 관측 기록. `asOf` 별로 한 행이다 — 없으면 추가하고, 있으면 그 행의 `computedOn` 이
+     * 오늘일 때만 교체한다(같은 날 재계산·부분 실패 뒤 재갱신 복구용). 다른 날 쓰인 행은
+     * 절대 건드리지 않는다(쓰기 자체를 하지 않는다) — 그날 화면이 사용자에게 보여준 값을
+     * 지키는 규칙이다(분기 유니버스 교체 뒤 같은 `asOf` 를 다시 계산해도 과거 행이 새
+     * 유니버스 값으로 바뀌지 않는다). [today] 는 호출부(화면)가 넘긴다 — 이 파일은 시계를
+     * 보지 않는다.
+     */
+    fun record(
+        signal: Signal,
+        today: String,
+    ) {
+        val universe = readJson<UniverseFile>(universeFile())
+        val rows = readJson<TrackFile>(trackFile())?.rows.orEmpty()
+        val idx = rows.indexOfFirst { it.asOf == signal.asOf }
+        if (idx >= 0 && rows[idx].computedOn != today) return
+
+        val row =
+            TrackRow(
+                asOf = signal.asOf,
+                computedOn = today,
+                targetBp = signal.targetBp,
+                band = signal.band.name,
+                score = signal.score,
+                breadth = signal.breadth,
+                pctile = signal.pctile,
+                window = signal.window,
+                universeAt = universe?.at.orEmpty(),
+                universeSize = universe?.codes?.size ?: 0,
+            )
+        val updated = if (idx >= 0) rows.toMutableList().apply { set(idx, row) } else rows + row
+        writeJson(trackFile(), TrackFile(updated))
+    }
+
     private fun universeFile() = File(dir, "universe.json")
 
     private fun barsFile(code: String) = File(dir, "bars/$code.json")
+
+    private fun indexFile() = File(dir, "index/$INDEX_CODE.json")
+
+    private fun trackFile() = File(dir, "track.json")
 
     private inline fun <reified T> readJson(file: File): T? {
         if (!file.isFile) return null
@@ -177,11 +301,12 @@ class MarketData(
     /**
      * dates·closes 길이가 어긋나거나(부분 기록), 종가에 0 이하가 섞이거나, dates 중 하나라도
      * 달력에 없는 날짜(YYYYMMDD 8자리 형식은 맞지만 13월처럼 무효한 값 포함)면(손상) 없는
-     * 파일로 본다 — 그 종목은 조용히 다시 받는다. 여기서 걸러야 손상된 일자·종가가 병합을
-     * 거쳐 파일에 그대로 남는 일 없이 스스로 회복된다.
+     * 파일로 본다 — 조용히 다시 받는다. 여기서 걸러야 손상된 일자·종가가 병합을 거쳐 파일에
+     * 그대로 남는 일 없이 스스로 회복된다. [file] 을 받으므로 종목(`bars/`)과 지수(`index/`)
+     * 양쪽에 같은 검증을 쓴다.
      */
-    private fun readBars(code: String): BarsFile? =
-        readJson<BarsFile>(barsFile(code))
+    private fun readBars(file: File): BarsFile? =
+        readJson<BarsFile>(file)
             ?.takeIf {
                 it.dates.size == it.closes.size &&
                     it.closes.all { c -> c > 0 } &&
@@ -222,10 +347,53 @@ class MarketData(
     // 진입 빈도로는 감당되는 비용이라 별도 캐시를 두지 않는다. 무거워지면 이진 포맷으로 승격.
     private fun loadCalendar(): Pair<List<String>, Map<String, IntArray>> {
         val universe = readJson<UniverseFile>(universeFile()) ?: return emptyList<String>() to emptyMap<String, IntArray>()
-        val perStock = universe.codes.mapNotNull { code -> readBars(code)?.let { code to it } }
+        val perStock = universe.codes.mapNotNull { code -> readBars(barsFile(code))?.let { code to it } }
         val calendar = perStock.flatMap { it.second.dates }.distinct().sorted()
         val closes = perStock.associate { (code, bars) -> code to alignedCloses(bars, calendar) }
         return calendar to closes
+    }
+
+    /**
+     * `track.json` 을 읽어 행 단위로 검증한다. 날짜(asOf·computedOn)는 8자리 달력일,
+     * universeAt 은 비어 있거나 8자리 달력일, targetBp 는 0~10000, score 는 0~1, window 는
+     * 0 이상이어야 한다 — 하나라도 벗어나면 그 행만 버리고 나머지는 살린다. 파일 자체가
+     * 깨졌으면(JSON 파싱 실패) [readJson] 이 이미 null 을 주므로 빈 기록으로 본다.
+     */
+    private fun readObs(): List<Obs> {
+        val rows = readJson<TrackFile>(trackFile())?.rows.orEmpty()
+        return rows
+            .filter { row ->
+                row.asOf.isCalendarDate() &&
+                    row.computedOn.isCalendarDate() &&
+                    (row.universeAt.isEmpty() || row.universeAt.isCalendarDate()) &&
+                    row.targetBp in 0..FULL_BP &&
+                    row.score in 0.0..1.0 &&
+                    row.window >= 0
+            }.map { row ->
+                Obs(
+                    asOf = row.asOf,
+                    computedOn = row.computedOn,
+                    targetBp = row.targetBp,
+                    score = row.score,
+                    window = row.window,
+                    universeAt = row.universeAt,
+                )
+            }
+    }
+
+    /**
+     * 069500 종가를 [calendar] 에 맞춰 정렬하고 첫 정의일을 1.0 으로 정규화한다(화면이 100
+     * 으로 재조정한다). 파일이 없거나 손상됐으면, 또는 [calendar] 와 겹치는 구간이 아예
+     * 없으면 null — 화면은 지수 없이 동일가중 평균만으로도 그려야 한다(실기기 확인 전까지의
+     * 미지수, 사양 §8).
+     */
+    private fun alignedIndex(calendar: List<String>): DoubleArray? {
+        val bars = readBars(indexFile()) ?: return null
+        val aligned = alignedCloses(bars, calendar)
+        val firstDefined = aligned.indexOfFirst { it != 0 }
+        if (firstDefined < 0) return null
+        val base = aligned[firstDefined].toDouble()
+        return DoubleArray(calendar.size) { t -> if (t < firstDefined) Double.NaN else aligned[t] / base }
     }
 
     private fun merge(
