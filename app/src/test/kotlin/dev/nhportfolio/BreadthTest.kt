@@ -201,13 +201,13 @@ class BreadthTest {
     fun `양자화는 두 번이다 - 구성별로 먼저 반올림한 뒤 평균해야 한다`() {
         val smooths = List(5) { 0.19 } + List(4) { 0.17 }
         // 오답: 평활값을 바로 평균해 한 번만 반올림하면 (5*0.19+4*0.17)/9 ≈ 0.1811 -> 1250 이 나온다.
-        assertEquals(2_500, Breadth.quantize(smooths))
+        assertEquals(2_500, Breadth.quantize(Breadth.score(smooths)))
     }
 
     @Test
     fun `앙상블 - 구성 전부가 같은 백분위면 그 값을 양자화한 것이 목표다`() {
-        assertEquals(1_250, Breadth.quantize(List(9) { 0.10 }))
-        assertEquals(7_500, Breadth.quantize(List(9) { 0.80 }))
+        assertEquals(1_250, Breadth.quantize(Breadth.score(List(9) { 0.10 })))
+        assertEquals(7_500, Breadth.quantize(Breadth.score(List(9) { 0.80 })))
     }
 
     /**
@@ -223,7 +223,7 @@ class BreadthTest {
 
         assertEquals(1.75 / 9, score)
         assertEquals(2_500, Breadth.quantize(score))
-        assertEquals(Breadth.quantize(smooths), Breadth.quantize(score))
+        assertEquals(Breadth.quantize(Breadth.score(smooths)), Breadth.quantize(score))
     }
 
     // ---- 밴드 ----

@@ -311,13 +311,6 @@ object Breadth {
      * 결과가 달라진다.
      */
     internal fun score(smooths: List<Double>): Double = smooths.map(::roundToEighth).average()
-
-    /**
-     * 앙상블 양자화 — **두 번** 일어난다. [score] 로 구성별 반올림 평균을 낸 뒤, 그 값을
-     * 다시 1250bp 단위로 반올림한다. 평활값을 바로 평균해 한 번만 반올림하면 결과가
-     * 달라진다(예: 5개 0.19 + 4개 0.17 은 두 번 양자화하면 2500bp, 한 번만 하면 1250bp).
-     */
-    internal fun quantize(smooths: List<Double>): Int = quantize(score(smooths))
 }
 
 /** 밴드의 한국어 표시명. 화면(MarketCard·BandGuideScreen·Track 의 표본 부족 진단)이 공유해 쓴다. */

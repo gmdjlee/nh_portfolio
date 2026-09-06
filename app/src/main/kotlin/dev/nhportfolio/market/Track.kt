@@ -132,6 +132,8 @@ private const val NARROW_THRESHOLD = 0.03
 private const val LAG_THRESHOLD = 5
 private const val PARTIAL_THRESHOLD = 0.5
 private const val BOUNDARY_THRESHOLD = 0.5
+
+// 진단 문구(diagnoseBoundary)는 이 값을 "1/32" 라는 문자열로 직접 적으므로 두 곳을 함께 바꿔야 한다.
 private const val BOUNDARY_TOLERANCE = 1.0 / 32
 private const val STALE_DAYS = 7L
 private const val STALE_THRESHOLD = 0.25
@@ -352,13 +354,7 @@ private fun dayReturn(
 
 private fun dailyReturn(series: DoubleArray): DoubleArray =
     DoubleArray(series.size) { t ->
-        if (t ==
-            0
-        ) {
-            Double.NaN
-        } else {
-            windowReturn(series, t - 1, t)
-        }
+        if (t == 0) Double.NaN else windowReturn(series, t - 1, t)
     }
 
 private fun firstDiff(series: DoubleArray): DoubleArray =
@@ -675,9 +671,17 @@ private fun noiseTripwire(
     var recent = 0
     for (t in from..end) if (held[t] != held[t - 1]) recent++
     return when {
-        recent > NOISE_MAX_TRADES -> Tripwire(name, Check.TRIPPED, "최근 ${window}거래일 동안 실행이 ${recent}회로 15회를 넘었습니다.")
-        spanLen >= TRIPWIRE_MIN_DAYS -> Tripwire(name, Check.OK, "최근 ${window}거래일 동안 실행이 ${recent}회로 15회 이내입니다.")
-        else -> Tripwire(name, Check.UNKNOWN, insufficientDetail(spanLen))
+        recent > NOISE_MAX_TRADES -> {
+            Tripwire(name, Check.TRIPPED, "최근 ${window}거래일 동안 실행이 ${recent}회로 ${NOISE_MAX_TRADES}회를 넘었습니다.")
+        }
+
+        spanLen >= TRIPWIRE_MIN_DAYS -> {
+            Tripwire(name, Check.OK, "최근 ${window}거래일 동안 실행이 ${recent}회로 ${NOISE_MAX_TRADES}회 이내입니다.")
+        }
+
+        else -> {
+            Tripwire(name, Check.UNKNOWN, insufficientDetail(spanLen))
+        }
     }
 }
 
@@ -862,7 +866,7 @@ private fun diagnoseNotApplied(
     val posOf = dates.withIndex().associate { (i, d) -> d to i }
     val appliedPos = applied.mapNotNull { posOf[it.date] }
     val missed = execDays.count { t -> appliedPos.none { p -> p in t..(t + APPLY_WINDOW) } }
-    val text = "모의 실행 ${execDays.size}건 중 ${missed}건이 5거래일 안에 적용되지 않았습니다."
+    val text = "모의 실행 ${execDays.size}건 중 ${missed}건이 ${APPLY_WINDOW}거래일 안에 적용되지 않았습니다."
     return Diagnosis(Cause.NOT_APPLIED, missed >= 1, text)
 }
 
@@ -883,7 +887,7 @@ private fun daysBetween(
 private fun diagnoseStale(located: List<Located>): Diagnosis {
     val stale = located.count { daysBetween(it.obs.asOf, it.obs.computedOn) > STALE_DAYS }
     val share = stale.toDouble() / located.size
-    val text = "관측 ${located.size}건 중 ${stale}건(${wholePct(share)}%)이 계산일과 관측일의 차이가 7일을 넘습니다."
+    val text = "관측 ${located.size}건 중 ${stale}건(${wholePct(share)}%)이 계산일과 관측일의 차이가 ${STALE_DAYS}일을 넘습니다."
     return Diagnosis(Cause.STALE, share > STALE_THRESHOLD, text)
 }
 
