@@ -106,6 +106,9 @@ internal fun verdictText(
  * 캐시가 모자라 [signal] 이 null 이면 판정 대신 확보한 거래일 수([signalDays])를 보여준다.
  * 카드를 누르면(버튼 제외) [onGuide] 로 밴드 지침 화면을 연다 — 그 시점의 밴드([Signal.band])를
  * 같이 넘겨 지침 화면이 해당 밴드를 강조해 보여줄 수 있게 한다.
+ *
+ * [onTrack] 은 "효용성" 버튼이 부른다 — [signal] 이 null 이어도(캐시가 모자라도) 항상 눌린다,
+ * 관측이 비어 있는 경우는 효용성 화면 쪽이 처리한다.
  */
 @Composable
 internal fun MarketCard(
@@ -118,6 +121,7 @@ internal fun MarketCard(
     marketError: String?,
     today: LocalDate,
     onSync: () -> Unit,
+    onTrack: () -> Unit,
     onApply: (Int) -> Unit,
     onGuide: (Band?) -> Unit,
 ) {
@@ -133,10 +137,13 @@ internal fun MarketCard(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("시장 신호", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(
-                enabled = sync !is SyncState.Running,
-                onClick = { if (signalDays == 0) confirmBackfill = true else onSync() },
-            ) { Text(if (sync is SyncState.Running) "갱신 중…" else "갱신") }
+            Row {
+                TextButton(onClick = onTrack) { Text("효용성") }
+                TextButton(
+                    enabled = sync !is SyncState.Running,
+                    onClick = { if (signalDays == 0) confirmBackfill = true else onSync() },
+                ) { Text(if (sync is SyncState.Running) "갱신 중…" else "갱신") }
+            }
         }
 
         marketError?.let {

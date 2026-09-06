@@ -888,6 +888,23 @@ class MarketDataTrackTest {
     }
 
     @Test
+    fun `record은 같은 asOf 행의 computedOn 이 날짜가 아니면 없는 행으로 보고 교체한다`() {
+        val f = MdFixture()
+        // 손으로 고쳤거나 옛·새 스키마가 섞여 computedOn 이 날짜가 아닌 행 — 오늘과 절대
+        // 같아질 수 없으므로, 없는 행으로 보지 않으면 이 asOf 는 영영 기록되지 않는다.
+        File(f.dir, "track.json").writeText(
+            """{"rows":[{"asOf":"20260904","computedOn":"garbage","targetBp":9999,"band":"MAX_DEFENSE",""" +
+                """"score":0.9,"breadth":0.9,"pctile":0.9,"window":756,"universeAt":"20260905","universeSize":199}]}""",
+        )
+
+        f.market.record(sampleSignal(targetBp = 2_500), today = "20260906")
+
+        val obs = f.market.trackData().obs
+        assertEquals(1, obs.size)
+        assertEquals(2_500, obs.first().targetBp, "computedOn 이 날짜가 아닌 행은 없는 것으로 보고 새 값으로 교체해야 한다")
+    }
+
+    @Test
     fun `손상된 기록 파일은 다음 record로 복구된다`() {
         val f = MdFixture()
         File(f.dir, "track.json").writeText("{ 이건 JSON 이 아니다")

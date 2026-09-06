@@ -245,8 +245,10 @@ class MarketData(
      * 오늘일 때만 교체한다(같은 날 재계산·부분 실패 뒤 재갱신 복구용). 다른 날 쓰인 행은
      * 절대 건드리지 않는다(쓰기 자체를 하지 않는다) — 그날 화면이 사용자에게 보여준 값을
      * 지키는 규칙이다(분기 유니버스 교체 뒤 같은 `asOf` 를 다시 계산해도 과거 행이 새
-     * 유니버스 값으로 바뀌지 않는다). [today] 는 호출부(화면)가 넘긴다 — 이 파일은 시계를
-     * 보지 않는다.
+     * 유니버스 값으로 바뀌지 않는다). 다만 그 행의 `computedOn` 이 8자리 날짜가 아니면(손으로
+     * 고쳤거나 옛/새 스키마가 섞인 손상) 없는 행으로 보고 교체한다 — 그렇지 않으면 오늘과
+     * 절대 같아질 수 없는 값에 막혀 그 `asOf` 는 영영 기록될 수 없다. [today] 는 호출부(화면)가
+     * 넘긴다 — 이 파일은 시계를 보지 않는다. 파일 I/O 를 포함하므로 메인 스레드에서 돌리지 않는다.
      */
     fun record(
         signal: Signal,
@@ -255,7 +257,8 @@ class MarketData(
         val universe = readJson<UniverseFile>(universeFile())
         val rows = readJson<TrackFile>(trackFile())?.rows.orEmpty()
         val idx = rows.indexOfFirst { it.asOf == signal.asOf }
-        if (idx >= 0 && rows[idx].computedOn != today) return
+        val existing = rows.getOrNull(idx)
+        if (existing != null && existing.computedOn.isCalendarDate() && existing.computedOn != today) return
 
         val row =
             TrackRow(

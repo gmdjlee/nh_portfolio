@@ -3,6 +3,8 @@ package dev.nhportfolio.store
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import dev.nhportfolio.market.Applied
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
 
@@ -28,6 +30,9 @@ fun cashKey(acctNo: String): Preferences.Key<String> = accountKey("cash3_", acct
 /** 사용자가 붙인 계좌 이름. NH API 는 계좌명을 주지 않는다. */
 fun nameKey(acctNo: String): Preferences.Key<String> = accountKey("name_", acctNo)
 
+/** "이 목표로 맞추기" 를 누른 기록(사양 §4.2). 계좌마다 판정·적용 여부가 갈리므로 계좌별 키다. */
+fun appliedKey(acctNo: String): Preferences.Key<String> = accountKey("applied_", acctNo)
+
 private const val FULL_BP = 10_000
 
 /** 저장값이 깨졌거나 범위를 벗어나도 화면이 죽지 않는다. */
@@ -44,6 +49,43 @@ fun readCashCodes(
     prefs: Preferences,
     key: Preferences.Key<String>,
 ): Set<String> = runCatching { Json.decodeFromString<Set<String>>(prefs[key] ?: "[]") }.getOrDefault(emptySet())
+
+/** DataStore 에 저장하는 적용 기록 행의 형태. [Applied] 는 `market/` 의 순수 타입이라
+ *  kotlinx.serialization 을 모른다 — 저장·복원은 이 DTO 를 거쳐서만 한다. */
+@Serializable
+private data class AppliedDto(
+    val date: String,
+    val exposureBp: Int,
+)
+
+private val APPLIED_DATE = Regex("^\\d{8}$")
+
+/** 저장값이 깨졌거나 행이 범위를 벗어나도 화면이 죽지 않는다 — 날짜가 8자리 숫자가 아니거나
+ *  exposureBp 가 0~10000 을 벗어난 행만 버리고 나머지는 살린다. */
+fun readApplied(
+    prefs: Preferences,
+    key: Preferences.Key<String>,
+): List<Applied> =
+    runCatching { Json.decodeFromString<List<AppliedDto>>(prefs[key] ?: "[]") }
+        .getOrDefault(emptyList())
+        .filter { APPLIED_DATE.matches(it.date) && it.exposureBp in 0..FULL_BP }
+        .map { Applied(it.date, it.exposureBp) }
+
+/** DataStore 한 번의 `edit` 이 파일 전체를 다시 쓰므로, 무한히 쌓이면 "이 목표로 맞추기"
+ *  한 번의 비용이 계속 커진다 — 최근 [MAX_APPLIED] 건만 남긴다. 연 몇 회 뿐이라 1000건이면
+ *  수백 년 분이다. */
+private const val MAX_APPLIED = 1_000
+
+/** [current] 뒤에 [date]·[exposureBp] 한 줄을 붙인 새 목록. 순수 함수라 호출부(뷰모델)가
+ *  같은 `store.edit` 안에서 목표 재기록과 함께 검증 없이 바로 쓸 수 있다. */
+fun withApplied(
+    current: List<Applied>,
+    date: String,
+    exposureBp: Int,
+): List<Applied> = (current + Applied(date, exposureBp)).takeLast(MAX_APPLIED)
+
+/** [withApplied] 가 만든 목록을 저장 형식으로 바꾼다. [Applied] 자체는 직렬화 대상이 아니라 [AppliedDto] 를 거친다. */
+fun encodeApplied(list: List<Applied>): String = Json.encodeToString(list.map { AppliedDto(it.date, it.exposureBp) })
 
 /**
  * 종목코드로 저장하던 옛 목표·현금성 지정을 지운다.
