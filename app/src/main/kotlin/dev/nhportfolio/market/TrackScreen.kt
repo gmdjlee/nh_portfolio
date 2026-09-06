@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -235,7 +236,7 @@ private fun TrackContent(
     observed: Report,
     retro: Report,
 ) {
-    var retroMode by remember { mutableStateOf(false) }
+    var retroMode by rememberSaveable { mutableStateOf(false) }
     val report = if (retroMode) retro else observed
     val targetSeries = if (retroMode) ui.retroTarget else ui.observedTarget
     val dots = if (retroMode) emptyList() else ui.observedDots
@@ -305,9 +306,13 @@ private fun MarketChart(
     val shadeColor = MaterialTheme.colorScheme.surfaceVariant
 
     val dates = market.dates
-    val indexLevel = market.index?.let { arr -> DoubleArray(arr.size) { i -> arr[i] * LEVEL_BASE } }
-    val equalLevel = DoubleArray(market.equal.size) { i -> market.equal[i] * LEVEL_BASE }
-    val (lo, hi) = levelRange(indexLevel, equalLevel)
+    val (indexLevel, equalLevel) =
+        remember(market) {
+            val idx = market.index?.let { arr -> DoubleArray(arr.size) { i -> arr[i] * LEVEL_BASE } }
+            val eq = DoubleArray(market.equal.size) { i -> market.equal[i] * LEVEL_BASE }
+            idx to eq
+        }
+    val (lo, hi) = remember(indexLevel, equalLevel) { levelRange(indexLevel, equalLevel) }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("시장과 신호", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
@@ -491,7 +496,10 @@ private fun DrawScope.drawLabelRight(
     drawText(layout, color = color, topLeft = Offset(rightX - layout.size.width, y))
 }
 
-/** 왼쪽 위: 최댓값. 아래 줄: 최솟값 + (간격) + 첫 날짜. 오른쪽 아래: 마지막 날짜. */
+/**
+ * 왼쪽 위: 최댓값(왼쪽 축). 오른쪽 위: 100%(오른쪽 축 — 모델 목표). 아래 줄: 최솟값(왼쪽 축) +
+ * (간격) + 첫 날짜, 오른쪽에 마지막 날짜. 그 한 줄 위 오른쪽에 0%(오른쪽 축).
+ */
 private fun DrawScope.drawChart1Labels(
     measurer: TextMeasurer,
     style: TextStyle,
@@ -501,8 +509,11 @@ private fun DrawScope.drawChart1Labels(
     hi: Double,
 ) {
     if (dates.isEmpty()) return
-    val bottomY = size.height - measurer.measure("0", style = style).size.height
+    val lineHeight = measurer.measure("0", style = style).size.height
+    val bottomY = size.height - lineHeight
     drawLabel(measurer, style, color, levelText(hi), 0f, 0f)
+    drawLabelRight(measurer, style, color, "100%", size.width, 0f)
+    drawLabelRight(measurer, style, color, "0%", size.width, bottomY - lineHeight)
     val minText = levelText(lo)
     drawLabel(measurer, style, color, minText, 0f, bottomY)
     val minWidth = measurer.measure(minText, style = style).size.width
@@ -510,7 +521,7 @@ private fun DrawScope.drawChart1Labels(
     drawLabelRight(measurer, style, color, formatDate(dates.last()), size.width, bottomY)
 }
 
-/** 위에서 아래로 +1 / 0 / −1, 그 아래 줄에 첫·마지막 날짜(§6: "min/max 와 0"). */
+/** 왼쪽 위: +1. 왼쪽 가운데: 0. 아래 줄: −1 + (간격) + 첫 날짜, 오른쪽에 마지막 날짜(§6: "min/max 와 0"). */
 private fun DrawScope.drawChart2Labels(
     measurer: TextMeasurer,
     style: TextStyle,
@@ -567,8 +578,11 @@ internal fun riskFitText(report: Report): String {
     }
     val low = qualified.first()
     val high = qualified.last()
-    val verb = if (report.riskFit == Fit.MATCH) "맞음" else "어긋남"
-    return "위험 분리: $verb(${low.band.label()} 변동성 ${pct0(low.vol)} > ${high.band.label()} ${pct0(high.vol)})"
+    if (report.riskFit == Fit.MISMATCH) {
+        return "위험 분리: 어긋남(${low.band.label()} 변동성 ${pct0(low.vol)} vs ${high.band.label()} ${pct0(high.vol)}, " +
+            "−10% 확률 ${pct0(low.drop10)} vs ${pct0(high.drop10)})"
+    }
+    return "위험 분리: 맞음(${low.band.label()} 변동성 ${pct0(low.vol)} > ${high.band.label()} ${pct0(high.vol)})"
 }
 
 /** 전략 가치(판정 B) 문구. [Track.simulate] 결과가 없으면(관측 부족) 숫자 없이 판정 불가만 알린다. */
@@ -595,7 +609,28 @@ internal fun directionText(direction: Double?): String {
 private fun BandTable(report: Report) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("밴드별 표", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        BandTableHeader()
         Band.entries.forEach { band -> BandRow(band, report.bands.find { it.band == band }) }
+    }
+}
+
+/** 실측·검증값 두 숫자 칸의 제목 줄. 첫 칸은 [BandStatLine] 의 라벨 칸과 자리를 맞추려 비워 둔다. */
+@Composable
+private fun BandTableHeader() {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("", modifier = Modifier.weight(1f))
+        Text(
+            "실측",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "검증값",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

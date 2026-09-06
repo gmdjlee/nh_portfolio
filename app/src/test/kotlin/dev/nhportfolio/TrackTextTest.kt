@@ -89,6 +89,15 @@ class TrackTextTest {
         assertEquals("-", pct0(Double.NaN))
     }
 
+    @Test
+    fun `절반은 은행가 반올림으로 짝수 쪽에 붙는다`() {
+        // 0.125·0.625 는 100 을 곱하면 이진수로도 정확히 12.5·62.5 다(둘 다 1/8 단위라 오차가
+        // 없다). kotlin.math.round 는 짝수 쪽(12, 62)으로 붙지만, roundToInt(반올림 올림)였다면
+        // 13%·63%가 나와 이 값들에서 깨진다.
+        assertEquals("12%", pct0(0.125))
+        assertEquals("62%", pct0(0.625))
+    }
+
     // ---- riskFitText ----
 
     @Test
@@ -103,14 +112,18 @@ class TrackTextTest {
     }
 
     @Test
-    fun `위험 분리가 어긋나도 문구 형태는 같고 맞음만 어긋남으로 바뀐다`() {
+    fun `위험 분리가 어긋나면 변동성과 하락 확률을 둘 다 vs 로 나란히 보여준다`() {
         val r =
             report(
                 riskFit = Fit.MISMATCH,
-                bands = listOf(bandStats(Band.MAX_DEFENSE, n = 10, vol = 0.10), bandStats(Band.ACTIVE, n = 6, vol = 0.30)),
+                bands =
+                    listOf(
+                        bandStats(Band.MAX_DEFENSE, n = 10, vol = 0.10, drop10 = 0.05),
+                        bandStats(Band.ACTIVE, n = 6, vol = 0.30, drop10 = 0.08),
+                    ),
             )
 
-        assertEquals("위험 분리: 어긋남(최대 방어 변동성 10% > 적극 30%)", riskFitText(r))
+        assertEquals("위험 분리: 어긋남(최대 방어 변동성 10% vs 적극 30%, −10% 확률 5% vs 8%)", riskFitText(r))
     }
 
     @Test
