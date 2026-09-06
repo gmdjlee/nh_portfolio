@@ -35,6 +35,7 @@ import dev.nhportfolio.lock.PinFlow
 import dev.nhportfolio.lock.PinMode
 import dev.nhportfolio.market.Band
 import dev.nhportfolio.market.BandGuideScreen
+import dev.nhportfolio.market.TrackScreen
 import dev.nhportfolio.portfolio.PortfolioScreen
 import dev.nhportfolio.security.Biometric
 import dev.nhportfolio.security.Vault
@@ -101,6 +102,12 @@ sealed interface Route {
 
     @Serializable
     data class Portfolio(
+        val no: String,
+    ) : Route
+
+    // 적용 기록이 계좌별이라(사양 §4.2) 효용성 화면도 계좌번호가 필요하다.
+    @Serializable
+    data class Track(
         val no: String,
     ) : Route
 
@@ -205,10 +212,18 @@ private fun AppNav() {
                             )
                         }
                         composable<Route.Portfolio> { entry ->
+                            val no = entry.toRoute<Route.Portfolio>().no
                             PortfolioScreen(
-                                acctNo = entry.toRoute<Route.Portfolio>().no,
+                                acctNo = no,
                                 onBack = { nav.popBackStack() },
                                 onGuide = { nav.navigate(Route.Guide(it?.name)) },
+                                onTrack = { nav.navigate(Route.Track(no)) },
+                            )
+                        }
+                        composable<Route.Track> { entry ->
+                            TrackScreen(
+                                acctNo = entry.toRoute<Route.Track>().no,
+                                onBack = { nav.popBackStack() },
                             )
                         }
                         composable<Route.Guide> { entry ->
