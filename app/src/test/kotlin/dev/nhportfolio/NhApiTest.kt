@@ -688,7 +688,8 @@ class NhApiTest {
                 when {
                     req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
                     req.headers[HttpHeaders.Authorization] == "Bearer STALE" -> json(INVALID_TOKEN_BODY, HttpStatusCode.BadRequest)
-                    else -> json(ACCOUNTS_BODY)
+                    req.headers[HttpHeaders.Authorization] == "Bearer T1" -> json(ACCOUNTS_BODY)
+                    else -> json("{}", HttpStatusCode.BadRequest)
                 }
             }
 
