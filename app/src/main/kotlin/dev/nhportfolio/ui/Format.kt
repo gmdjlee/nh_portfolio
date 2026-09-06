@@ -34,7 +34,7 @@ fun Double.pct(): String = formatter("+#,##0.00;-#,##0.00").format(this) + "%"
 
 /** 배경이 어두운 테마인지. 손익·칩 색을 배경에 맞춰 고르는 데 쓴다. */
 @Composable
-private fun onDark(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+internal fun onDark(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
 /** 국내 관례: 이익 빨강, 손실 파랑. 배경에 따라 대비를 맞춘 값을 고른다. */
 @Composable

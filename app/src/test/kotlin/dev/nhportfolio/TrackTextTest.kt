@@ -14,19 +14,25 @@ import dev.nhportfolio.market.Signal
 import dev.nhportfolio.market.Strategy
 import dev.nhportfolio.market.Track
 import dev.nhportfolio.market.Tripwire
+import dev.nhportfolio.market.dateTicks
 import dev.nhportfolio.market.diagnosisText
 import dev.nhportfolio.market.directionText
 import dev.nhportfolio.market.gateText
 import dev.nhportfolio.market.label
+import dev.nhportfolio.market.niceTicks
 import dev.nhportfolio.market.pct0
 import dev.nhportfolio.market.retroObs
 import dev.nhportfolio.market.retroScores
 import dev.nhportfolio.market.riskFitText
 import dev.nhportfolio.market.strategyFitText
 import dev.nhportfolio.market.tripwireText
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private fun signal(
     targetBp: Int,
@@ -70,6 +76,36 @@ private fun report(
     predictive = DoubleArray(0),
     diagnoses = emptyList(),
 )
+
+/** 주말만 뺀 평일 달력을 yyyyMMdd 오름차순으로 만든다 — dateTicks 테스트용 합성 데이터. */
+private fun weekdays(
+    start: LocalDate,
+    end: LocalDate,
+): List<String> {
+    val out = mutableListOf<String>()
+    var d = start
+    while (!d.isAfter(end)) {
+        if (d.dayOfWeek != DayOfWeek.SATURDAY && d.dayOfWeek != DayOfWeek.SUNDAY) {
+            out.add(d.format(DateTimeFormatter.BASIC_ISO_DATE))
+        }
+        d = d.plusDays(1)
+    }
+    return out
+}
+
+/** dateTicks 가 실제로 지키기로 한 계약: 이웃 눈금을 [plotWidthPx] 위에 늘어놨을 때 간격이 [minGapPx] 이상이어야 한다. */
+private fun assertGapsHold(
+    ticks: List<Pair<Int, String>>,
+    dateCount: Int,
+    plotWidthPx: Float,
+    minGapPx: Float,
+) {
+    val denom = (dateCount - 1).toFloat()
+    val xs = ticks.map { (i, _) -> i / denom * plotWidthPx }
+    for (k in 1 until xs.size) {
+        assertTrue(xs[k] - xs[k - 1] >= minGapPx, "gap ${xs[k] - xs[k - 1]} < $minGapPx at $k")
+    }
+}
 
 class TrackTextTest {
     // ---- pct0 ----
@@ -325,5 +361,96 @@ class TrackTextTest {
         val scores = retroScores(retro)
 
         assertContentEquals(doubleArrayOf(0.3, Double.NaN, 0.7), scores)
+    }
+
+    // ---- niceTicks ----
+
+    @Test
+    fun `95_3 에서 141_2 까지는 10 단위 다섯 눈금이다`() {
+        assertContentEquals(listOf(100.0, 110.0, 120.0, 130.0, 140.0), niceTicks(95.3, 141.2))
+    }
+
+    @Test
+    fun `0 에서 1 까지는 0_2 단위 여섯 눈금이다`() {
+        assertContentEquals(listOf(0.0, 0.2, 0.4, 0.6, 0.8, 1.0), niceTicks(0.0, 1.0))
+    }
+
+    @Test
+    fun `범위가 좁으면 값은 범위 안에서 오름차순으로 1개에서 6개 사이만 나온다`() {
+        val ticks = niceTicks(99.5, 100.5)
+
+        assertTrue(ticks.size in 1..6)
+        assertTrue(ticks.all { it in 99.5..100.5 })
+        assertContentEquals(ticks.sorted(), ticks)
+    }
+
+    @Test
+    fun `lo 가 hi 이상이면 빈 목록이다`() {
+        assertContentEquals(emptyList(), niceTicks(5.0, 5.0))
+        assertContentEquals(emptyList(), niceTicks(6.0, 5.0))
+    }
+
+    @Test
+    fun `NaN 이 섞이면 빈 목록이다`() {
+        assertContentEquals(emptyList(), niceTicks(Double.NaN, 1.0))
+        assertContentEquals(emptyList(), niceTicks(0.0, Double.NaN))
+    }
+
+    // ---- dateTicks ----
+
+    @Test
+    fun `좁은 그림 폭에서는 연도 눈금만 남는다`() {
+        // 3년치 평일 달력 — 월간 8개월(20일 안팎) 간격도 300px 에서는 64px 를 못 채운다.
+        val dates = weekdays(LocalDate.of(2023, 1, 2), LocalDate.of(2025, 12, 31))
+
+        val ticks = dateTicks(dates, plotWidthPx = 300f, minGapPx = 64f)
+
+        assertEquals(listOf("2023", "2024", "2025"), ticks.map { it.second })
+        assertGapsHold(ticks, dates.size, plotWidthPx = 300f, minGapPx = 64f)
+    }
+
+    @Test
+    fun `넓은 그림 폭에서는 분기 눈금 12개가 나온다`() {
+        // 같은 3년 달력을 2000px 로 넓히면 월(약 20일 간격)은 여전히 64px 를 못 채우지만
+        // 분기(약 64일 간격)는 채운다 — 그래서 연이 아니라 분기가 뽑힌다.
+        val dates = weekdays(LocalDate.of(2023, 1, 2), LocalDate.of(2025, 12, 31))
+
+        val ticks = dateTicks(dates, plotWidthPx = 2000f, minGapPx = 64f)
+
+        assertEquals(
+            listOf("23.01", "23.04", "23.07", "23.10", "24.01", "24.04", "24.07", "24.10", "25.01", "25.04", "25.07", "25.10"),
+            ticks.map { it.second },
+        )
+        ticks.forEach { (i, _) -> assertTrue(i == 0 || dates[i].substring(0, 6) != dates[i - 1].substring(0, 6)) }
+        assertGapsHold(ticks, dates.size, plotWidthPx = 2000f, minGapPx = 64f)
+    }
+
+    @Test
+    fun `8개월 달력을 1000px 에 그리면 월별 눈금이다`() {
+        val dates = weekdays(LocalDate.of(2023, 1, 2), LocalDate.of(2023, 8, 31))
+
+        val ticks = dateTicks(dates, plotWidthPx = 1000f, minGapPx = 64f)
+
+        assertEquals(
+            listOf("23.01", "23.02", "23.03", "23.04", "23.05", "23.06", "23.07", "23.08"),
+            ticks.map { it.second },
+        )
+        assertGapsHold(ticks, dates.size, plotWidthPx = 1000f, minGapPx = 64f)
+    }
+
+    @Test
+    fun `날짜가 하나뿐이면 빈 목록이다`() {
+        assertEquals(emptyList(), dateTicks(listOf("20260101"), plotWidthPx = 1000f, minGapPx = 64f))
+    }
+
+    @Test
+    fun `연 눈금도 촘촘하면 몇 개씩 걸러 간격을 맞춘다`() {
+        // 60년치 평일 달력을 300px 에 그리면 연 눈금(60개)조차 64px 를 못 채운다 — 걸러야 한다.
+        val dates = weekdays(LocalDate.of(1970, 1, 2), LocalDate.of(2029, 12, 31))
+
+        val ticks = dateTicks(dates, plotWidthPx = 300f, minGapPx = 64f)
+
+        assertTrue(ticks.size in 2..59)
+        assertGapsHold(ticks, dates.size, plotWidthPx = 300f, minGapPx = 64f)
     }
 }
