@@ -14,6 +14,7 @@ import dev.nhportfolio.market.Signal
 import dev.nhportfolio.market.Strategy
 import dev.nhportfolio.market.Track
 import dev.nhportfolio.market.Tripwire
+import dev.nhportfolio.market.dateTickCandidates
 import dev.nhportfolio.market.dateTicks
 import dev.nhportfolio.market.diagnosisText
 import dev.nhportfolio.market.directionText
@@ -25,10 +26,12 @@ import dev.nhportfolio.market.retroObs
 import dev.nhportfolio.market.retroScores
 import dev.nhportfolio.market.riskFitText
 import dev.nhportfolio.market.strategyFitText
+import dev.nhportfolio.market.tickLabel
 import dev.nhportfolio.market.tripwireText
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -91,6 +94,15 @@ private fun weekdays(
         d = d.plusDays(1)
     }
     return out
+}
+
+/** niceTicks 가 실제로 지키기로 한 계약: 눈금 사이 간격이 전부 같아야 한다(2.5×10^k 걸음이 소수 자리 하나를 빼먹으면 깨진다). */
+private fun assertEvenSpacing(ticks: List<Double>) {
+    if (ticks.size < 2) return
+    val step = ticks[1] - ticks[0]
+    for (i in 2 until ticks.size) {
+        assertTrue(abs((ticks[i] - ticks[i - 1]) - step) < 1e-9, "간격이 고르지 않다: $ticks")
+    }
 }
 
 /** dateTicks 가 실제로 지키기로 한 계약: 이웃 눈금을 [plotWidthPx] 위에 늘어놨을 때 간격이 [minGapPx] 이상이어야 한다. */
@@ -367,21 +379,46 @@ class TrackTextTest {
 
     @Test
     fun `95_3 에서 141_2 까지는 10 단위 다섯 눈금이다`() {
-        assertContentEquals(listOf(100.0, 110.0, 120.0, 130.0, 140.0), niceTicks(95.3, 141.2))
+        val ticks = niceTicks(95.3, 141.2)
+
+        assertContentEquals(listOf(100.0, 110.0, 120.0, 130.0, 140.0), ticks)
+        assertEvenSpacing(ticks)
     }
 
     @Test
     fun `0 에서 1 까지는 0_2 단위 여섯 눈금이다`() {
-        assertContentEquals(listOf(0.0, 0.2, 0.4, 0.6, 0.8, 1.0), niceTicks(0.0, 1.0))
+        val ticks = niceTicks(0.0, 1.0)
+
+        assertContentEquals(listOf(0.0, 0.2, 0.4, 0.6, 0.8, 1.0), ticks)
+        assertEvenSpacing(ticks)
     }
 
     @Test
-    fun `범위가 좁으면 값은 범위 안에서 오름차순으로 1개에서 6개 사이만 나온다`() {
+    fun `92 에서 106_3 까지는 2_5 단위 여섯 눈금이고 92_5 는 93 으로 뭉개지지 않는다`() {
+        // 회귀: roundToStep 이 걸음 값만으로 소수 자릿수를 되짚으면(-floor(log10(step))) 2.5 걸음이
+        // 한 자리 모자라(0 자리) 92.5 가 93 으로 반올림됐다 — factor·exponent 를 따로 들고 다녀야 한다.
+        val ticks = niceTicks(92.0, 106.3)
+
+        assertContentEquals(listOf(92.5, 95.0, 97.5, 100.0, 102.5, 105.0), ticks)
+        assertEvenSpacing(ticks)
+    }
+
+    @Test
+    fun `0 에서 1_3 까지는 0_25 단위 여섯 눈금이다`() {
+        val ticks = niceTicks(0.0, 1.3)
+
+        assertContentEquals(listOf(0.0, 0.25, 0.5, 0.75, 1.0, 1.25), ticks)
+        assertEvenSpacing(ticks)
+    }
+
+    @Test
+    fun `범위가 좁으면 값은 범위 안에서 오름차순으로 1개에서 6개 사이만 나오고 간격은 고르다`() {
         val ticks = niceTicks(99.5, 100.5)
 
         assertTrue(ticks.size in 1..6)
         assertTrue(ticks.all { it in 99.5..100.5 })
         assertContentEquals(ticks.sorted(), ticks)
+        assertEvenSpacing(ticks)
     }
 
     @Test
@@ -394,6 +431,29 @@ class TrackTextTest {
     fun `NaN 이 섞이면 빈 목록이다`() {
         assertContentEquals(emptyList(), niceTicks(Double.NaN, 1.0))
         assertContentEquals(emptyList(), niceTicks(0.0, Double.NaN))
+    }
+
+    // ---- tickLabel ----
+
+    @Test
+    fun `걸음이 요구하는 소수 자릿수만큼만 보여주고 정수 걸음은 소수점을 안 붙인다`() {
+        assertEquals("99.4", tickLabel(99.4, 0.2))
+        assertEquals("100.0", tickLabel(100.0, 0.2))
+        assertEquals("120", tickLabel(120.0, 10.0))
+        assertEquals("2.5", tickLabel(2.5, 2.5))
+    }
+
+    // ---- dateTickCandidates ----
+
+    @Test
+    fun `3년 달력에서 후보는 월 36 분기 12 연 3 개다`() {
+        val dates = weekdays(LocalDate.of(2023, 1, 2), LocalDate.of(2025, 12, 31))
+
+        val candidates = dateTickCandidates(dates)
+
+        assertEquals(36, candidates.month.size)
+        assertEquals(12, candidates.quarter.size)
+        assertEquals(3, candidates.year.size)
     }
 
     // ---- dateTicks ----

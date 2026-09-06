@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -68,6 +67,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -337,17 +337,19 @@ private fun MarketChart(
         }
     val (lo, hi) = remember(indexLevel, equalLevel) { levelRange(indexLevel, equalLevel) }
     val leftTicks = remember(lo, hi) { niceTicks(lo, hi) }
+    val leftStep = remember(leftTicks) { if (leftTicks.size >= 2) leftTicks[1] - leftTicks[0] else 1.0 }
+    val dateCandidates = remember(dates) { dateTickCandidates(dates) }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("시장과 신호", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         LineChartCanvas(CHART1_HEIGHT) {
-            val leftLabels = leftTicks.map { levelText(it) }.ifEmpty { listOf(levelText(lo), levelText(hi)) }
+            val leftLabels = leftTicks.map { tickLabel(it, leftStep) }.ifEmpty { listOf(tickLabel(lo, 1.0), tickLabel(hi, 1.0)) }
             val rightGutter = measurer.measure("100%", style = labelStyle).size.width + GUTTER_GAP.toPx()
             val plot = plotArea(measurer, labelStyle, leftLabels, rightGutter)
             val toX = xMapper(dates.size, plot.left, plot.right)
             val toYLevel = yMapper(lo, hi, plot.top, plot.bottom)
             val toYPct = yMapper(0.0, 1.0, plot.top, plot.bottom)
-            val xTicks = dateTicks(dates, plot.right - plot.left, MIN_TICK_GAP.toPx())
+            val xTicks = dateTicks(dateCandidates, plot.right - plot.left, MIN_TICK_GAP.toPx())
 
             clipRect(plot.left, plot.top, plot.right, plot.bottom) {
                 drawHorizonShading(dates.size, toX, shadeColor, plot)
@@ -360,7 +362,7 @@ private fun MarketChart(
             }
 
             val bottomRowY = size.height - measurer.measure("0", style = labelStyle).size.height
-            leftTicks.forEach { v -> drawAxisLabelLeft(measurer, labelStyle, labelColor, levelText(v), toYLevel(v)) }
+            leftTicks.forEach { v -> drawAxisLabelLeft(measurer, labelStyle, labelColor, tickLabel(v, leftStep), toYLevel(v)) }
             PCT_AXIS_TICKS.forEach { (v, label) -> drawAxisLabelRight(measurer, labelStyle, labelColor, label, toYPct(v)) }
             xTicks.forEach { (i, label) -> drawAxisLabelBottom(measurer, labelStyle, labelColor, label, toX(i), bottomRowY) }
         }
@@ -384,6 +386,7 @@ private fun CorrelationChart(
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val zeroColor = MaterialTheme.colorScheme.onSurfaceVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val dateCandidates = remember(dates) { dateTickCandidates(dates) }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("상관관계 추이", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
@@ -392,7 +395,7 @@ private fun CorrelationChart(
             // 만큼만(그 라벨 폭의 절반) 나중에 넓힌다 — 브리프 규칙 2.
             val leftLabels = CORR_AXIS_TICKS.map { it.second }
             val provisional = plotArea(measurer, labelStyle, leftLabels, rightGutter = 0f)
-            val xTicks = dateTicks(dates, provisional.right - provisional.left, MIN_TICK_GAP.toPx())
+            val xTicks = dateTicks(dateCandidates, provisional.right - provisional.left, MIN_TICK_GAP.toPx())
             val lastLabelWidth = xTicks.lastOrNull()?.let { (_, label) -> measurer.measure(label, style = labelStyle).size.width } ?: 0
             val plot = provisional.copy(right = provisional.right - lastLabelWidth / 2f)
             val toX = xMapper(dates.size, plot.left, plot.right)
@@ -458,7 +461,9 @@ private fun DrawScope.plotArea(
             } ?: 0f
         ) + GUTTER_GAP.toPx()
     val top = lineHeight / 2f
-    val bottom = lineHeight + AXIS_BOTTOM_PAD.toPx()
+    // 아래 여백은 라벨 한 줄 반 — 왼쪽 축의 맨 아래 눈금 라벨이 세로 가운데를 그 눈금(plot.bottom)에
+    // 맞추면 라벨 절반이 그 아래로 내려가는데, 한 줄만 비워 두면 그 절반이 날짜 줄과 겹친다.
+    val bottom = lineHeight * 1.5f + AXIS_BOTTOM_PAD.toPx()
     return PlotArea(left = leftGutter, top = top, right = size.width - rightGutter, bottom = size.height - bottom)
 }
 
@@ -498,6 +503,20 @@ private val NICE_FACTORS = doubleArrayOf(1.0, 2.0, 2.5, 5.0)
 private const val NICE_TICK_EPS = 1e-9
 
 /**
+ * {1, 2, 2.5, 5}×10^k 걸음 하나. [decimals] 는 이 걸음의 배수를 오차 없이 적는 데 필요한 소수
+ * 자릿수다 — `factor` 가 2.5 면 그 자체로 소수 한 자리를 더 쓴다(2.5, 0.25 처럼). 이 값을
+ * `-floor(log10(step))` 처럼 걸음 "값"만으로 되짚으면 2.5×10^k 걸음마다 한 자리가 모자라
+ * 92.5 가 93 으로 뭉개진다 — factor·exponent 를 따로 들고 있어야 하는 이유다.
+ */
+private data class NiceStep(
+    val factor: Double,
+    val exponent: Int,
+) {
+    val value: Double get() = factor * 10.0.pow(exponent)
+    val decimals: Int get() = (-exponent + if (factor == 2.5) 1 else 0).coerceAtLeast(0)
+}
+
+/**
  * "예쁜 눈금" 걸음(step)을 {1, 2, 2.5, 5}×10^k 중에서 고른다 — [lo, hi] 안에 있는 step 의 배수
  * 개수가 [maxTicks] 이하이면서 가능하면 2개 이상이 되도록, 그중 가장 촘촘한(작은) step 을 쓴다.
  * `lo >= hi` 이거나 NaN 이 섞이면 그릴 축이 없다는 뜻이라 빈 목록을 돌려준다.
@@ -509,17 +528,17 @@ internal fun niceTicks(
 ): List<Double> {
     if (lo.isNaN() || hi.isNaN() || lo >= hi) return emptyList()
     val exp0 = floor(log10(hi - lo)).toInt()
-    val steps = ((exp0 - 4)..(exp0 + 2)).flatMap { e -> NICE_FACTORS.map { f -> f * 10.0.pow(e) } }.sorted()
+    val steps = ((exp0 - 4)..(exp0 + 2)).flatMap { e -> NICE_FACTORS.map { f -> NiceStep(f, e) } }.sortedBy { it.value }
 
-    fun bounds(step: Double): Pair<Long, Long> {
-        val kLo = ceil(lo / step - NICE_TICK_EPS).toLong()
-        val kHi = floor(hi / step + NICE_TICK_EPS).toLong()
+    fun bounds(step: NiceStep): Pair<Long, Long> {
+        val kLo = ceil(lo / step.value - NICE_TICK_EPS).toLong()
+        val kHi = floor(hi / step.value + NICE_TICK_EPS).toLong()
         return kLo to kHi
     }
 
-    fun ticksAt(step: Double): List<Double> {
+    fun ticksAt(step: NiceStep): List<Double> {
         val (kLo, kHi) = bounds(step)
-        return (kLo..kHi).map { k -> roundToStep(k * step, step) }
+        return (kLo..kHi).map { k -> roundToStep(k * step.value, step.decimals) }
     }
 
     var fallback: List<Double>? = null
@@ -537,11 +556,28 @@ internal fun niceTicks(
 /** 부동소수 곱셈 오차를 지운다 — step=0.2 의 세 번째 배수가 0.6000000000000001 로 나오는 것을 막는다. */
 private fun roundToStep(
     v: Double,
-    step: Double,
+    decimals: Int,
 ): Double {
-    val decimals = (-floor(log10(step) + NICE_TICK_EPS)).toInt().coerceAtLeast(0)
     val scale = 10.0.pow(decimals)
     return (v * scale).roundToLong() / scale
+}
+
+/**
+ * 눈금 값을 [step] 이 요구하는 소수 자릿수까지만 적는다 — 0.2 걸음이면 "99.4", 10 걸음이면
+ * 소수점 없이 "120". [levelText] 처럼 정수로 뭉개면 걸음이 1 보다 작을 때 눈금이 전부 같은
+ * 문자열이 돼 버린다(범례는 마지막 값 하나만 보여줘 그 문제가 없으므로 [levelText] 를 그대로 쓴다).
+ */
+internal fun tickLabel(
+    v: Double,
+    step: Double,
+): String {
+    var d = 0
+    while (d < 6) {
+        val scaled = step * 10.0.pow(d)
+        if (abs(scaled - scaled.roundToLong()) < 1e-6) break
+        d++
+    }
+    return String.format(Locale.ROOT, "%.${d}f", v)
 }
 
 private val QUARTER_MONTHS = setOf("01", "04", "07", "10")
@@ -554,38 +590,63 @@ private fun yearMonth(date: String) = date.substring(0, 6)
 
 private fun yearMonthLabel(date: String) = "${date.substring(2, 4)}.${month(date)}"
 
+/** [dateTicks] 의 월·분기·연 후보(달력 위치, 라벨). [dateCount] 는 원래 [dates] 의 길이 — 눈금 위치를 폭에 매핑할 때 분모로 쓴다. */
+internal data class DateTickCandidates(
+    val dateCount: Int,
+    val month: List<Pair<Int, String>>,
+    val quarter: List<Pair<Int, String>>,
+    val year: List<Pair<Int, String>>,
+)
+
 /**
- * 날짜 눈금. [dates] 는 yyyyMMdd 오름차순. 월 → 분기 → 연 순서로(촘촘한 것부터) 후보를 만들어
- * [plotWidthPx] 위에 늘어놨을 때 이웃 눈금 사이가 전부 [minGapPx] 이상인 첫 후보를 쓴다. 연도까지도
- * 너무 촘촘하면 몇 개씩 걸러(every n-th) 간격을 맞춘다.
+ * [dates](yyyyMMdd 오름차순)에서 월·분기·연이 바뀌는 자리를 한 번만 훑어 후보로 만든다. 순수
+ * 계산이라 컴포저블에서 `remember(dates)` 로 감싸 두면, 그리기 루프(매 프레임)는 이 결과를 들고
+ * 간격 산수만 하는 [dateTicks] 오버로드를 부르면 된다 — 매 프레임 substring 을 다시 걷지 않는다.
  */
+internal fun dateTickCandidates(dates: List<String>): DateTickCandidates {
+    val monthIdx = dates.indices.filter { i -> i == 0 || yearMonth(dates[i]) != yearMonth(dates[i - 1]) }
+    val monthTicks = monthIdx.map { it to yearMonthLabel(dates[it]) }
+    val quarterTicks = monthIdx.filter { i -> month(dates[i]) in QUARTER_MONTHS }.map { it to yearMonthLabel(dates[it]) }
+    val yearIdx = dates.indices.filter { i -> i == 0 || year(dates[i]) != year(dates[i - 1]) }
+    val yearTicks = yearIdx.map { it to year(dates[it]) }
+    return DateTickCandidates(dateCount = dates.size, month = monthTicks, quarter = quarterTicks, year = yearTicks)
+}
+
+/**
+ * 날짜 눈금. 월 → 분기 → 연 순서로(촘촘한 것부터) [candidates] 중 [plotWidthPx] 위에 늘어놨을 때
+ * 이웃 눈금 사이가 전부 [minGapPx] 이상인 첫 후보를 쓴다. 연도까지도 너무 촘촘하면 몇 개씩
+ * 걸러(every n-th) 간격을 맞춘다. 간격 산수만 하는 순수 함수라 매 프레임 불러도 싸다.
+ */
+internal fun dateTicks(
+    candidates: DateTickCandidates,
+    plotWidthPx: Float,
+    minGapPx: Float,
+): List<Pair<Int, String>> {
+    if (candidates.dateCount < 2) return emptyList()
+    val denom = (candidates.dateCount - 1).toFloat()
+
+    fun x(i: Int) = i / denom * plotWidthPx
+
+    fun gapsHold(ticks: List<Pair<Int, String>>): Boolean {
+        for (k in 1 until ticks.size) if (x(ticks[k].first) - x(ticks[k - 1].first) < minGapPx) return false
+        return true
+    }
+
+    if (gapsHold(candidates.month)) return candidates.month
+    if (candidates.quarter.isNotEmpty() && gapsHold(candidates.quarter)) return candidates.quarter
+    if (gapsHold(candidates.year)) return candidates.year
+
+    var stride = 2
+    while (!gapsHold(candidates.year.filterIndexed { i, _ -> i % stride == 0 })) stride++
+    return candidates.year.filterIndexed { i, _ -> i % stride == 0 }
+}
+
+/** [dates] 를 매번 훑는 얇은 겹침 — 테스트와 옛 호출부용. 그리기 루프에서는 [dateTickCandidates] 를 먼저 `remember` 하고 위 오버로드를 쓴다. */
 internal fun dateTicks(
     dates: List<String>,
     plotWidthPx: Float,
     minGapPx: Float,
-): List<Pair<Int, String>> {
-    if (dates.size < 2) return emptyList()
-    val denom = (dates.size - 1).toFloat()
-
-    fun x(i: Int) = i / denom * plotWidthPx
-
-    fun gapsHold(idx: List<Int>): Boolean {
-        for (k in 1 until idx.size) if (x(idx[k]) - x(idx[k - 1]) < minGapPx) return false
-        return true
-    }
-
-    val monthIdx = dates.indices.filter { i -> i == 0 || yearMonth(dates[i]) != yearMonth(dates[i - 1]) }
-    val quarterIdx = monthIdx.filter { i -> month(dates[i]) in QUARTER_MONTHS }
-    val yearIdx = dates.indices.filter { i -> i == 0 || year(dates[i]) != year(dates[i - 1]) }
-
-    if (gapsHold(monthIdx)) return monthIdx.map { it to yearMonthLabel(dates[it]) }
-    if (quarterIdx.isNotEmpty() && gapsHold(quarterIdx)) return quarterIdx.map { it to yearMonthLabel(dates[it]) }
-    if (gapsHold(yearIdx)) return yearIdx.map { it to year(dates[it]) }
-
-    var stride = 2
-    while (!gapsHold(yearIdx.filterIndexed { i, _ -> i % stride == 0 })) stride++
-    return yearIdx.filterIndexed { i, _ -> i % stride == 0 }.map { it to year(dates[it]) }
-}
+): List<Pair<Int, String>> = dateTicks(dateTickCandidates(dates), plotWidthPx, minGapPx)
 
 /**
  * 선 하나. NaN 은 붓을 뗀다 — 이어 그리지 않는다. [step] 이면 새 값이 나올 때까지 이전 값을
@@ -761,7 +822,6 @@ private data class LegendEntry(
 )
 
 /** 차트 아래 범례. 터치 스크럽은 1차 범위 밖이라 각 계열의 마지막 값만 보여준다(사양 §6). */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChartLegend(vararg items: LegendEntry) {
     FlowRow(
