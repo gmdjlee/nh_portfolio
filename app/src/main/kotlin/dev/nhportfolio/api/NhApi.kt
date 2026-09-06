@@ -107,6 +107,9 @@ data class NhResponse<A, B>(
 )
 
 private val OK_CODES = setOf("00000", "00166", "00221", "13578")
+
+/** 만료·무효 토큰은 401 이 아니라 400 으로 온다; 발급은 성공한다 — 실기기 확인(2026-09-06). */
+private const val INVALID_TOKEN_CODE = "IGW40043"
 private val NOT_OK = listOf("않", "못", "미완료")
 
 /** 정상 코드는 여러 개이고 API 마다 다르다 — 코드 집합 ∪ 메시지로 판정한다.
@@ -135,11 +138,20 @@ inline fun <T> loadResult(block: () -> T): Result<T> =
     }
 
 /**
+ * [NhApi.call] 전용 — 400~403 응답의 본문에서 rsp_cd 를 읽어 [INVALID_TOKEN_CODE] 인지 본다.
+ * 본문이 JSON 이 아니거나 파싱이 안 되면 토큰 거부가 아닌 것으로 본다(조용히 false).
+ */
+private suspend fun HttpResponse.hasInvalidTokenCode(): Boolean =
+    loadResult { NhJson.decodeFromString<NhResponse<JsonElement, JsonElement>>(bodyAsText()) }
+        .getOrNull()
+        ?.rspCd == INVALID_TOKEN_CODE
+
+/**
  * NH PLUG OpenAPI 클라이언트. HTTP·WebSocket·NH JSON 을 아는 앱의 유일한 파일이다.
  *
- * 토큰 규칙: 24시간 캐시, 401 일 때만 재발급(그것도 발급 1시간 경과 후),
- * 429 는 지연만, IO 오류는 재시도하지 않는다 — 재발급 경로를 하나로 유지해
- * NH 보안 알림을 유발하지 않기 위해서다.
+ * 토큰 규칙: 24시간 캐시, 401 이거나 NH 가 `IGW40043`(유효하지 않은 token) 을 돌려줄 때만
+ * 재발급(그것도 발급 1시간 경과 후), 429 는 지연만, IO 오류는 재시도하지 않는다 —
+ * 재발급 경로를 하나로 유지해 NH 보안 알림을 유발하지 않기 위해서다.
  */
 class NhApi(
     private val vault: Vault,
@@ -378,8 +390,17 @@ class NhApi(
                         headers.append("cts_flag", "Y")
                     }
                 }
+            // 만료·무효 토큰은 401 이 아니라 400 으로 온다; 발급은 성공한다 — 실기기 확인(2026-09-06),
+            // acctinfo 가 {"rsp_cd":"IGW40043","rsp_msg":"유효하지 않은 token 입니다."} 를 HTTP 400 으로
+            // 돌려줬다. 401 과 똑같이 재발급 대상으로 본다. pages() 는 status.isSuccess() 가 아니면
+            // 본문을 안 읽고 바로 던지므로 여기서 읽은 본문을 다시 읽는 경로는 없다 — Ktor 3.x 는
+            // 그래도 SaveBodyPlugin(DoubleReceivePlugin) 을 기본 설치해서 bodyAsText() 를 몇 번
+            // 불러도 안전하다(MockEngine 포함, 실측 확인).
+            val tokenRejected =
+                response.status == HttpStatusCode.Unauthorized ||
+                    (response.status.value in 400..403 && response.hasInvalidTokenCode())
             when {
-                response.status == HttpStatusCode.Unauthorized && !reissued -> {
+                tokenRejected && !reissued -> {
                     reissued = true
                     bearer = token(rejected = bearer)
                 }

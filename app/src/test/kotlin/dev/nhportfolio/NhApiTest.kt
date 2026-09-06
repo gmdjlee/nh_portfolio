@@ -63,6 +63,9 @@ private fun MockRequestHandleScope.json(
 
 private const val TOKEN_BODY = """{"access_token":"T1","token_type":"Bearer","expires_in":86400}"""
 
+/** NH 가 만료·무효 토큰에 실제로 돌려주는 모양 — 실기기 확인(2026-09-06), HTTP 상태는 400 이다. */
+private const val INVALID_TOKEN_BODY = """{"rsp_cd":"IGW40043","rsp_msg":"유효하지 않은 token 입니다."}"""
+
 private const val ACCOUNTS_BODY = """
 {"rsp_cd":"00000","rsp_msg":"조회가 완료되었습니다.","cust_no":"1",
  "Output_0":[{"acct_no":"20101036881","acct_type":"01"},{"acct_no":"50051036881","acct_type":"03"}]}
@@ -671,6 +674,82 @@ class NhApiTest {
             assertEquals("HTTP401", assertFailsWith<NhException> { f.api.accounts() }.code)
             assertEquals("HTTP401", assertFailsWith<NhException> { f.api.accounts() }.code)
             assertEquals(1, f.tokenCalls, "1시간 창 안에서는 재발급하지 않는다")
+        }
+
+    @Test
+    fun `400 IGW40043 이면 401 처럼 한 번 재발급하고 한 번 재시도한다`() =
+        runTest {
+            // 실기기 확인(2026-09-06) — 만료·무효 토큰에 NH 가 401 이 아니라 이 조합(400+IGW40043)을
+            // 돌려준다. 발급 자체는 성공하므로 앱 키를 다시 저장해도 못 빠져나오는 문제의 근본 원인이다.
+            val f = ApiFixture()
+            f.ready()
+            f.seedToken("STALE", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis() - 2 * HOUR)
+            f.handle = { req ->
+                when {
+                    req.url.encodedPath == "/oauth2/token" -> json(TOKEN_BODY)
+                    req.headers[HttpHeaders.Authorization] == "Bearer STALE" -> json(INVALID_TOKEN_BODY, HttpStatusCode.BadRequest)
+                    req.headers[HttpHeaders.Authorization] == "Bearer T1" -> json(ACCOUNTS_BODY)
+                    else -> json("{}", HttpStatusCode.BadRequest)
+                }
+            }
+
+            assertEquals(1, f.api.accounts().size)
+            assertEquals(1, f.tokenCalls)
+            assertEquals("T1", f.vault.secrets().token)
+        }
+
+    @Test
+    fun `방금 발급한 토큰이 400 IGW40043 이어도 다시 발급하지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.seedToken("FRESH0", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis())
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    json(INVALID_TOKEN_BODY, HttpStatusCode.BadRequest)
+                }
+            }
+
+            assertEquals("HTTP401", assertFailsWith<NhException> { f.api.accounts() }.code)
+            assertEquals(0, f.tokenCalls, "방금 발급한 토큰을 또 거부하면 자격 문제다 — 재발급을 시도하면 안 된다")
+        }
+
+    @Test
+    fun `400 이어도 rsp_cd 가 IGW40043 이 아니면 재발급하지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.seedToken("T0", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis())
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    json("""{"rsp_cd":"IGW40051","rsp_msg":"잘못된 요청입니다."}""", HttpStatusCode.BadRequest)
+                }
+            }
+
+            assertEquals("HTTP400", assertFailsWith<NhException> { f.api.accounts() }.code)
+            assertEquals(0, f.tokenCalls)
+        }
+
+    @Test
+    fun `400 본문이 JSON 이 아니어도 재발급하지 않는다`() =
+        runTest {
+            val f = ApiFixture()
+            f.ready()
+            f.seedToken("T0", expiresAt = Long.MAX_VALUE, issuedAt = System.currentTimeMillis())
+            f.handle = { req ->
+                if (req.url.encodedPath == "/oauth2/token") {
+                    json(TOKEN_BODY)
+                } else {
+                    respond("not json", HttpStatusCode.BadRequest)
+                }
+            }
+
+            assertEquals("HTTP400", assertFailsWith<NhException> { f.api.accounts() }.code)
+            assertEquals(0, f.tokenCalls)
         }
 
     @Test
