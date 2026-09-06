@@ -319,3 +319,13 @@ object Breadth {
      */
     internal fun quantize(smooths: List<Double>): Int = quantize(score(smooths))
 }
+
+/** 밴드의 한국어 표시명. 화면(MarketCard·BandGuideScreen·Track 의 표본 부족 진단)이 공유해 쓴다. */
+internal fun Band.label(): String =
+    when (this) {
+        Band.MAX_DEFENSE -> "최대 방어"
+        Band.DEFENSE -> "방어"
+        Band.NEUTRAL -> "중립"
+        Band.ACTIVE -> "적극"
+        Band.MAX_INVEST -> "최대 투입"
+    }

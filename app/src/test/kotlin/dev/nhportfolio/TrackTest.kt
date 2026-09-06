@@ -128,6 +128,27 @@ class TrackTest {
         assertEquals(0, sim.trades)
     }
 
+    @Test
+    fun `simulate 는 매도쪽 비용도 손 계산과 일치한다`() {
+        // t=1 은 목표(0.8)가 그대로라 재조정이 없다. t=2 는 t=1 에서 정해진 목표(0.2)로 줄이며
+        // |0.2-0.8|=0.6 ge 0.15 이므로 매도 비용(0.0017)을 문다.
+        val targetBp = intArrayOf(8_000, 2_000, -1)
+        val prices = doubleArrayOf(100.0, 102.0, 101.0)
+
+        val sim = Track.simulate(targetBp, prices)
+
+        val ret1 = prices[1] / prices[0] - 1.0
+        val nav1 = 1.0 * (1.0 + 0.8 * ret1)
+        val ret2 = prices[2] / prices[1] - 1.0
+        val nav2Precost = nav1 * (1.0 + 0.8 * ret2)
+        val nav2 = nav2Precost * (1.0 - 0.6 * 0.0017)
+
+        assertEquals(0.8, sim.held[0])
+        assertEquals(nav2, sim.nav[2], 1e-12)
+        assertEquals(0.2, sim.held[2], 1e-12)
+        assertEquals(1, sim.trades)
+    }
+
     // ---- riskFit ----
 
     @Test
@@ -172,6 +193,60 @@ class TrackTest {
         val report = Track.report(lowBand + highBand, Market(dates, null, prices), emptyList(), null)
 
         assertEquals(Fit.UNKNOWN, report.riskFit)
+    }
+
+    @Test
+    fun `BandStats 는 상수 일별 수익률 두 창에서 median worst drop10 rise10 vol 을 정확히 낸다`() {
+        val n = 200
+        val dates = labels(n)
+        val prices = DoubleArray(n)
+        for (t in 0..63) prices[t] = 1_000.0 * 1.002.pow(t) // 창1(관측 pos=0): 일별 +0.2%, fwd1 ≈ +13.4%
+        prices[64] = 1_000.0 // 창2 는 독립된 기준가에서 시작한다
+        for (t in 65..127) prices[t] = 1_000.0 * 0.997.pow(t - 64) // 창2(관측 pos=64): 일별 -0.3%, fwd2 ≈ -17.2%
+        for (t in 128 until n) prices[t] = prices[127]
+
+        val obs = listOf(obsAt(dates, 0, targetBp = 2_000), obsAt(dates, 64, targetBp = 2_000)) // 둘 다 DEFENSE
+        val report = Track.report(obs, Market(dates, null, prices), emptyList(), null)
+
+        val band = report.bands.single()
+        assertEquals(Band.DEFENSE, band.band)
+        assertEquals(2, band.n)
+
+        val fwd1 = 1.002.pow(63) - 1.0
+        val fwd2 = 0.997.pow(63) - 1.0
+        val dailyReturns = List(63) { 0.002 } + List(63) { -0.003 }
+        val mean = dailyReturns.average()
+        val variance = dailyReturns.sumOf { (it - mean) * (it - mean) } / (dailyReturns.size - 1)
+        val expectedVol = kotlin.math.sqrt(variance) * kotlin.math.sqrt(252.0)
+
+        assertEquals((fwd1 + fwd2) / 2.0, band.median, 1e-9)
+        assertEquals(minOf(fwd1, fwd2), band.worst, 1e-9)
+        assertEquals(0.5, band.drop10, 1e-9) // fwd2 ≈ -17% < -10% 인 창이 둘 중 하나
+        assertEquals(0.5, band.rise10, 1e-9) // fwd1 ≈ +13% > 10% 인 창이 둘 중 하나
+        assertEquals(expectedVol, band.vol, 1e-9)
+    }
+
+    @Test
+    fun `direction 은 NEUTRAL 을 빼고 ACTIVE 상승은 적중 DEFENSE 상승은 미적중으로 가른다`() {
+        val n = 300
+        val dates = labels(n)
+        val prices = DoubleArray(n)
+        for (t in 0..63) prices[t] = 1_000.0 * 1.002.pow(t) // ACTIVE 뒤 상승 -> 적중(밴드가 상승을 주장했고 실제로 올랐다)
+        prices[64] = 1_000.0
+        for (t in 65..127) prices[t] = 1_000.0 * 1.001.pow(t - 64) // DEFENSE 뒤에도 상승 -> 미적중(하락을 주장했는데 올랐다)
+        prices[128] = 1_000.0
+        for (t in 129..191) prices[t] = 1_000.0 * 0.999.pow(t - 128) // NEUTRAL -> 방향 주장이 없어 통계에서 아예 빠져야 한다
+        for (t in 192 until n) prices[t] = prices[191]
+
+        val obs =
+            listOf(
+                obsAt(dates, 0, targetBp = 6_000), // ACTIVE
+                obsAt(dates, 64, targetBp = 2_000), // DEFENSE
+                obsAt(dates, 128, targetBp = 5_000), // NEUTRAL
+            )
+        val report = Track.report(obs, Market(dates, null, prices), emptyList(), null)
+
+        assertEquals(0.5, assertNotNull(report.direction), 1e-9)
     }
 
     // ---- Gate 경계 ----
@@ -254,6 +329,38 @@ class TrackTest {
         assertTrue(corr[Track.CORR_MIN_OBS - 2].isNaN(), "CORR_MIN_OBS=${Track.CORR_MIN_OBS} 미만인 11개는 NaN 이어야 한다")
     }
 
+    /**
+     * score·trailing·forward 세 값 모두 관측 순서(i)의 순수한 1차식이 되도록 값을 직접 박아 넣는다.
+     * 63일 간격을 두고 떨어진 세 자리(pos-63·pos·pos+63)는 관측 13개(5일 간격) 전부에서 서로 겹치지
+     * 않으므로(63/5 가 정수가 아니다) 각 관측의 trailing·forward 를 독립적으로 지정할 수 있다.
+     * score 가 trailing 과는 완전한 1차 비례(+), forward 와는 완전한 1차 반비례(-) 관계이므로
+     * 피어슨 상관은 정확히 +1.0 과 -1.0 이 나와야 한다 — 부호가 바뀌거나 선행/동행이 뒤바뀌면 이 값이 갈린다.
+     */
+    @Test
+    fun `coincident 는 동행이 오르면 양, predictive 는 이후가 내리면 음이고 정의되지 않은 자리는 NaN 이다`() {
+        val n = 400
+        val dates = labels(n)
+        val prices = DoubleArray(n) { 1_000.0 }
+        val positions = List(13) { i -> 137 + 5 * i }
+        val obs =
+            positions.mapIndexed { i, pos ->
+                val trailing = 0.05 + 0.01 * i // i 에 대해 증가
+                val forward = 0.10 - 0.01 * i // i 에 대해 감소
+                prices[pos - Track.HORIZON] = 1_000.0
+                prices[pos] = 1_000.0 * (1.0 + trailing)
+                prices[pos + Track.HORIZON] = prices[pos] * (1.0 + forward)
+                obsAt(dates, pos, targetBp = 5_000, score = 0.10 + 0.05 * i)
+            }
+
+        val report = Track.report(obs, Market(dates, null, prices), emptyList(), null)
+
+        val at = positions.last()
+        assertEquals(1.0, report.coincident[at], 1e-9)
+        assertEquals(-1.0, report.predictive[at], 1e-9)
+        assertTrue(report.coincident[50].isNaN(), "관측이 없는 이른 날짜는 NaN 이어야 한다")
+        assertTrue(report.predictive[50].isNaN(), "관측이 없는 이른 날짜는 NaN 이어야 한다")
+    }
+
     // ---- lagPeak ----
 
     @Test
@@ -313,6 +420,16 @@ class TrackTest {
         val strategy = assertNotNull(report.strategy)
         val dd = strategy.tripwires.first { it.name == "낙폭 초과" }
         assertEquals(Check.TRIPPED, dd.check)
+
+        // 목표가 시작부터 끝까지 100%(재조정 없음)라 모의 NAV 가 가격을 1:1로 그대로 따라간다 —
+        // ret·mdd 가 단순 보유(holdRet·holdMdd)와 정확히 같아야 한다. 1000 -> 400 은 -60%.
+        assertEquals(-0.6, strategy.ret, 1e-9)
+        assertEquals(-0.6, strategy.holdRet, 1e-9)
+        assertEquals(-0.6, strategy.mdd, 1e-9)
+        assertEquals(-0.6, strategy.holdMdd, 1e-9)
+        // MATCH 는 모의 낙폭이 단순 보유보다 얕아야(엄격히 커야) 하는데 여기선 완전히 같고,
+        // 게다가 낙폭 초과 폐기 조건도 TRIPPED 다 — 어느 쪽으로 봐도 MISMATCH 다.
+        assertEquals(Fit.MISMATCH, report.strategyFit)
     }
 
     @Test
@@ -398,6 +515,11 @@ class TrackTest {
         assertTrue(report.gate.ok)
         assertEquals(Cause.values().toSet(), report.diagnoses.map { it.cause }.toSet())
         assertEquals(9, report.diagnoses.size)
+
+        // 목표가 0/10000 을 매번 오가며 23번 바뀌고, 그 폭(1.0)이 항상 15%p 문턱을 넘어 23번
+        // 그대로 실행된다 — 실행이 변경의 절반에 못 미치지 않으므로 SUPPRESSED 는 flagged 가 아니다.
+        val suppressed = report.diagnoses.first { it.cause == Cause.SUPPRESSED }
+        assertFalse(suppressed.flagged)
     }
 
     @Test
@@ -428,5 +550,86 @@ class TrackTest {
             )
 
         assertEquals(1, report.gate.matured)
+    }
+
+    // ---- 원인 진단: 문턱 양쪽(NARROW·STALE·SUPPRESSED) ----
+
+    /**
+     * 낮은 밴드(DEFENSE) 23건 + 다른 밴드 1건(밴드 2종·기간 126 충족용)으로 게이트를 통과시킨다.
+     * index·equal 을 각각 [ri]·[re] 로 매일 일정하게 성장시켜 낮은 밴드 관측 23건 전부가 같은
+     * (지수 수익률 − 동일가중 수익률) 값을 내도록 한다 — 평균을 낼 필요 없이 값 하나만 재현하면 된다.
+     */
+    private fun narrowScenario(
+        ri: Double,
+        re: Double,
+    ): Report {
+        val n = 300
+        val dates = labels(n)
+        val index = DoubleArray(n) { t -> 1_000.0 * (1.0 + ri).pow(t) }
+        val equal = DoubleArray(n) { t -> 1_000.0 * (1.0 + re).pow(t) }
+        val lowBand = (0..22).map { obsAt(dates, it, targetBp = 2_000) } // DEFENSE
+        val other = obsAt(dates, 130, targetBp = 5_000) // NEUTRAL — 밴드 2종·기간 126 충족용
+        return Track.report(lowBand + listOf(other), Market(dates, index, equal), emptyList(), null)
+    }
+
+    @Test
+    fun `NARROW 진단은 지수-동일가중 격차가 3퍼센트포인트를 넘으면 flagged 다`() {
+        val report = narrowScenario(ri = 0.0030, re = -0.0030) // 격차 약 38%p — 문턱을 크게 웃돈다
+        val narrow = report.diagnoses.first { it.cause == Cause.NARROW }
+        assertTrue(narrow.flagged)
+    }
+
+    @Test
+    fun `NARROW 진단은 지수-동일가중 격차가 3퍼센트포인트 이하면 flagged 가 아니다`() {
+        val report = narrowScenario(ri = 0.0001, re = 0.00005) // 격차 약 0.3%p — 문턱을 밑돈다
+        val narrow = report.diagnoses.first { it.cause == Cause.NARROW }
+        assertFalse(narrow.flagged)
+    }
+
+    /** 클러스터 23건(밴드 무관, computedOn 만 다름) + 다른 밴드 1건으로 게이트를 통과시킨다. */
+    private fun staleScenario(staleCount: Int): Report {
+        val n = 300
+        val dates = labels(n)
+        val cluster =
+            (0..22).map { i ->
+                val computedOn =
+                    if (i < staleCount) {
+                        LocalDate.parse(dates[i], DateTimeFormatter.BASIC_ISO_DATE).plusDays(8).format(DateTimeFormatter.BASIC_ISO_DATE)
+                    } else {
+                        dates[i]
+                    }
+                obsAt(dates, i, targetBp = 5_000, computedOn = computedOn)
+            }
+        val other = obsAt(dates, 130, targetBp = 0)
+        return Track.report(cluster + listOf(other), Market(dates, null, DoubleArray(n) { 1.0 }), emptyList(), null)
+    }
+
+    @Test
+    fun `STALE 진단은 오래된 관측 비율이 25퍼센트를 넘으면 flagged 다`() {
+        val report = staleScenario(staleCount = 7) // 7/24 ≈ 29.2% > 25%
+        val stale = report.diagnoses.first { it.cause == Cause.STALE }
+        assertTrue(stale.flagged)
+    }
+
+    @Test
+    fun `STALE 진단은 오래된 관측 비율이 25퍼센트 이하면 flagged 가 아니다`() {
+        val report = staleScenario(staleCount = 6) // 6/24 = 25%, 초과가 아니라서 flagged 가 아니다(경계)
+        val stale = report.diagnoses.first { it.cause == Cause.STALE }
+        assertFalse(stale.flagged)
+    }
+
+    @Test
+    fun `SUPPRESSED 진단은 목표 변경 대비 모의 실행이 절반 미만이면 flagged 다`() {
+        val n = 300
+        val dates = labels(n)
+        // 클러스터 안에서는 100bp 씩만 오가 15%p 문턱을 넘지 못해 실행이 없고, 마지막에만 크게 뛴다.
+        val cluster = (0..22).map { i -> obsAt(dates, i, targetBp = if (i % 2 == 0) 5_000 else 5_100) }
+        val jump = obsAt(dates, 130, targetBp = 0)
+
+        val report = Track.report(cluster + listOf(jump), Market(dates, null, DoubleArray(n) { 1.0 }), emptyList(), null)
+
+        // changes=23(클러스터 내 22번 + 마지막 점프 1번), trades=1(점프만 15%p 문턱을 넘는다) -> 1 < 11.5.
+        val suppressed = report.diagnoses.first { it.cause == Cause.SUPPRESSED }
+        assertTrue(suppressed.flagged)
     }
 }

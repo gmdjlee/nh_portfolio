@@ -99,15 +99,6 @@ internal fun verdictText(
     return title to detail.toString()
 }
 
-internal fun Band.label(): String =
-    when (this) {
-        Band.MAX_DEFENSE -> "최대 방어"
-        Band.DEFENSE -> "방어"
-        Band.NEUTRAL -> "중립"
-        Band.ACTIVE -> "적극"
-        Band.MAX_INVEST -> "최대 투입"
-    }
-
 /**
  * 시장 신호 카드. [heldBp] 는 (유지 비중, 예수금 목표 기준 여부) — [dev.nhportfolio.portfolio.heldBp] 가 만든다.
  * [actualBp] 는 실제 주식 비중 합(현금 제외, bp) — 계산은 화면(Rebalance)이 하고 카드는 표시만 한다.
