@@ -1,16 +1,21 @@
 package dev.nhportfolio.market
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -34,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
@@ -49,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dev.nhportfolio.store.appliedKey
 import dev.nhportfolio.store.readApplied
+import dev.nhportfolio.ui.chartColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,8 +67,14 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.round
+import kotlin.math.roundToLong
 
 /**
  * 효용성 화면의 상태. [loading] 이 끝나면 [observed]·[retro] 가 항상 함께 채워진다 — 토글은
@@ -284,8 +297,18 @@ private const val LEVEL_BASE = 100.0
 private const val RANGE_PAD_FRACTION = 0.05
 private const val SHADE_ALPHA = 0.3f
 private val LINE_WIDTH = 2.dp
+private val THIN_LINE_WIDTH = 1.5.dp
 private val DOT_RADIUS = 3.dp
-private val LABEL_GAP = 8.dp
+private val DOT_RING_WIDTH = 1.dp
+private val GUTTER_GAP = 6.dp
+private val AXIS_BOTTOM_PAD = 4.dp
+private val MIN_TICK_GAP = 64.dp
+
+/** 차트 1 오른쪽 축(모델 목표, 0~100%)의 고정 눈금 — 라벨만 그리고 격자는 왼쪽 축이 맡는다(브리프 규칙 3). */
+private val PCT_AXIS_TICKS = listOf(0.0 to "0%", 0.25 to "25%", 0.5 to "50%", 0.75 to "75%", 1.0 to "100%")
+
+/** 차트 2(상관관계)의 고정 눈금. 0 은 기준선이라 다른 색으로 그린다. */
+private val CORR_AXIS_TICKS = listOf(-1.0 to "−1", -0.5 to "−0.5", 0.0 to "0", 0.5 to "+0.5", 1.0 to "+1")
 
 /**
  * 차트 1: 069500·동일가중 평균(왼쪽 축, 첫날 100)과 모델 목표(오른쪽 축, 0~100%). 마지막
@@ -299,11 +322,11 @@ private fun MarketChart(
 ) {
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.bodySmall
-    val indexColor = MaterialTheme.colorScheme.primary
-    val equalColor = MaterialTheme.colorScheme.secondary
-    val targetColor = MaterialTheme.colorScheme.tertiary
+    val colors = chartColors()
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val shadeColor = MaterialTheme.colorScheme.surfaceVariant
+    val ringColor = MaterialTheme.colorScheme.surface
 
     val dates = market.dates
     val (indexLevel, equalLevel) =
@@ -313,24 +336,40 @@ private fun MarketChart(
             idx to eq
         }
     val (lo, hi) = remember(indexLevel, equalLevel) { levelRange(indexLevel, equalLevel) }
+    val leftTicks = remember(lo, hi) { niceTicks(lo, hi) }
+    val leftStep = remember(leftTicks) { if (leftTicks.size >= 2) leftTicks[1] - leftTicks[0] else 1.0 }
+    val dateCandidates = remember(dates) { dateTickCandidates(dates) }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("시장과 신호", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         LineChartCanvas(CHART1_HEIGHT) {
-            val toX = xMapper(dates.size, size.width)
-            val toYLevel = yMapper(lo, hi, size.height)
-            val toYPct = yMapper(0.0, 1.0, size.height)
-            drawHorizonShading(dates.size, toX, shadeColor)
-            indexLevel?.let { drawSeries(it, indexColor, step = false, toX, toYLevel) }
-            drawSeries(equalLevel, equalColor, step = false, toX, toYLevel)
-            drawSeries(targetSeries, targetColor, step = true, toX, toYPct)
-            drawDots(dots, targetColor, toX, toYPct)
-            drawChart1Labels(measurer, labelStyle, labelColor, dates, lo, hi)
+            val leftLabels = leftTicks.map { tickLabel(it, leftStep) }.ifEmpty { listOf(tickLabel(lo, 1.0), tickLabel(hi, 1.0)) }
+            val rightGutter = measurer.measure("100%", style = labelStyle).size.width + GUTTER_GAP.toPx()
+            val plot = plotArea(measurer, labelStyle, leftLabels, rightGutter)
+            val toX = xMapper(dates.size, plot.left, plot.right)
+            val toYLevel = yMapper(lo, hi, plot.top, plot.bottom)
+            val toYPct = yMapper(0.0, 1.0, plot.top, plot.bottom)
+            val xTicks = dateTicks(dateCandidates, plot.right - plot.left, MIN_TICK_GAP.toPx())
+
+            clipRect(plot.left, plot.top, plot.right, plot.bottom) {
+                drawHorizonShading(dates.size, toX, shadeColor, plot)
+                drawVerticalGrid(xTicks.map { it.first }, toX, plot, gridColor)
+                drawHorizontalGrid(leftTicks, toYLevel, plot, gridColor)
+                indexLevel?.let { drawSeries(it, colors.index, step = false, toX, toYLevel, THIN_LINE_WIDTH) }
+                drawSeries(equalLevel, colors.equal, step = false, toX, toYLevel, THIN_LINE_WIDTH)
+                drawSeries(targetSeries, colors.target, step = true, toX, toYPct, LINE_WIDTH)
+                drawDots(dots, colors.target, ringColor, toX, toYPct)
+            }
+
+            val bottomRowY = size.height - measurer.measure("0", style = labelStyle).size.height
+            leftTicks.forEach { v -> drawAxisLabelLeft(measurer, labelStyle, labelColor, tickLabel(v, leftStep), toYLevel(v)) }
+            PCT_AXIS_TICKS.forEach { (v, label) -> drawAxisLabelRight(measurer, labelStyle, labelColor, label, toYPct(v)) }
+            xTicks.forEach { (i, label) -> drawAxisLabelBottom(measurer, labelStyle, labelColor, label, toX(i), bottomRowY) }
         }
         ChartLegend(
-            "069500" to (indexLevel?.let { levelText(lastDefined(it)) } ?: "-"),
-            "동일가중 평균" to levelText(lastDefined(equalLevel)),
-            "모델 목표" to pct0(lastDefined(targetSeries)),
+            LegendEntry("069500", indexLevel?.let { levelText(lastDefined(it)) } ?: "-", colors.index),
+            LegendEntry("동일가중 평균", levelText(lastDefined(equalLevel)), colors.equal),
+            LegendEntry("모델 목표", pct0(lastDefined(targetSeries)), colors.target, dot = true),
         )
     }
 }
@@ -343,24 +382,39 @@ private fun CorrelationChart(
 ) {
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.bodySmall
-    val coincidentColor = MaterialTheme.colorScheme.primary
-    val predictiveColor = MaterialTheme.colorScheme.secondary
+    val colors = chartColors()
     val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val zeroColor = MaterialTheme.colorScheme.onSurfaceVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val dateCandidates = remember(dates) { dateTickCandidates(dates) }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("상관관계 추이", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         LineChartCanvas(CHART2_HEIGHT) {
-            val toX = xMapper(dates.size, size.width)
-            val toY = yMapper(-1.0, 1.0, size.height)
-            drawHorizontalLine(toY(0.0), gridColor)
-            drawSeries(report.coincident, coincidentColor, step = false, toX, toY)
-            drawSeries(report.predictive, predictiveColor, step = false, toX, toY)
-            drawChart2Labels(measurer, labelStyle, labelColor, dates)
+            // 오른쪽 축이 없어 오른쪽 여백은 0 에서 시작해, 마지막 날짜 눈금 라벨이 잘리지 않을
+            // 만큼만(그 라벨 폭의 절반) 나중에 넓힌다 — 브리프 규칙 2.
+            val leftLabels = CORR_AXIS_TICKS.map { it.second }
+            val provisional = plotArea(measurer, labelStyle, leftLabels, rightGutter = 0f)
+            val xTicks = dateTicks(dateCandidates, provisional.right - provisional.left, MIN_TICK_GAP.toPx())
+            val lastLabelWidth = xTicks.lastOrNull()?.let { (_, label) -> measurer.measure(label, style = labelStyle).size.width } ?: 0
+            val plot = provisional.copy(right = provisional.right - lastLabelWidth / 2f)
+            val toX = xMapper(dates.size, plot.left, plot.right)
+            val toY = yMapper(-1.0, 1.0, plot.top, plot.bottom)
+
+            clipRect(plot.left, plot.top, plot.right, plot.bottom) {
+                drawVerticalGrid(xTicks.map { it.first }, toX, plot, gridColor)
+                CORR_AXIS_TICKS.forEach { (v, _) -> drawHorizontalLine(toY(v), plot, if (v == 0.0) zeroColor else gridColor) }
+                drawSeries(report.coincident, colors.coincident, step = false, toX, toY, LINE_WIDTH)
+                drawSeries(report.predictive, colors.predictive, step = false, toX, toY, LINE_WIDTH)
+            }
+
+            val bottomRowY = size.height - measurer.measure("0", style = labelStyle).size.height
+            CORR_AXIS_TICKS.forEach { (v, label) -> drawAxisLabelLeft(measurer, labelStyle, labelColor, label, toY(v)) }
+            xTicks.forEach { (i, label) -> drawAxisLabelBottom(measurer, labelStyle, labelColor, label, toX(i), bottomRowY) }
         }
         ChartLegend(
-            "동행" to corrText(lastDefined(report.coincident)),
-            "선행" to corrText(lastDefined(report.predictive)),
+            LegendEntry("동행", corrText(lastDefined(report.coincident)), colors.coincident),
+            LegendEntry("선행", corrText(lastDefined(report.predictive)), colors.predictive),
         )
     }
 }
@@ -374,21 +428,63 @@ private fun LineChartCanvas(
     Canvas(Modifier.fillMaxWidth().height(height)) { onDraw() }
 }
 
+/** 그림이 실제로 앉는 사각형(캔버스 좌표, px). 이 밖은 축 라벨이 앉는 여백(gutter)이다(브리프 규칙 2). */
+private data class PlotArea(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+/**
+ * [leftLabels] 중 가장 넓은 것으로 왼쪽 여백을, [rightGutter] 로 오른쪽 여백을 잡는다. 위쪽은
+ * 라벨 반 줄, 아래쪽은 라벨 한 줄 + 여유만큼 그림 영역에서 덜어낸다.
+ */
+private fun DrawScope.plotArea(
+    measurer: TextMeasurer,
+    style: TextStyle,
+    leftLabels: List<String>,
+    rightGutter: Float,
+): PlotArea {
+    val lineHeight =
+        measurer
+            .measure("0", style = style)
+            .size.height
+            .toFloat()
+    val leftGutter =
+        (
+            leftLabels.maxOfOrNull {
+                measurer
+                    .measure(it, style = style)
+                    .size.width
+                    .toFloat()
+            } ?: 0f
+        ) + GUTTER_GAP.toPx()
+    val top = lineHeight / 2f
+    // 아래 여백은 라벨 한 줄 반 — 왼쪽 축의 맨 아래 눈금 라벨이 세로 가운데를 그 눈금(plot.bottom)에
+    // 맞추면 라벨 절반이 그 아래로 내려가는데, 한 줄만 비워 두면 그 절반이 날짜 줄과 겹친다.
+    val bottom = lineHeight * 1.5f + AXIS_BOTTOM_PAD.toPx()
+    return PlotArea(left = leftGutter, top = top, right = size.width - rightGutter, bottom = size.height - bottom)
+}
+
 private fun xMapper(
     count: Int,
-    width: Float,
+    left: Float,
+    right: Float,
 ): (Int) -> Float {
     val denom = (count - 1).coerceAtLeast(1).toFloat()
-    return { i -> width * i / denom }
+    val span = right - left
+    return { i -> left + span * i / denom }
 }
 
 private fun yMapper(
     lo: Double,
     hi: Double,
-    height: Float,
+    top: Float,
+    bottom: Float,
 ): (Double) -> Float {
     val span = (hi - lo).takeIf { it != 0.0 } ?: 1.0
-    return { v -> height - ((v - lo) / span).toFloat() * height }
+    return { v -> bottom - ((v - lo) / span).toFloat() * (bottom - top) }
 }
 
 /** 왼쪽 축 범위. 069500·동일가중 평균의 정의된 값만으로 min/max 를 잡고 양옆에 작은 여백을 둔다. */
@@ -403,6 +499,155 @@ private fun levelRange(
     return (lo - pad) to (hi + pad)
 }
 
+private val NICE_FACTORS = doubleArrayOf(1.0, 2.0, 2.5, 5.0)
+private const val NICE_TICK_EPS = 1e-9
+
+/**
+ * {1, 2, 2.5, 5}×10^k 걸음 하나. [decimals] 는 이 걸음의 배수를 오차 없이 적는 데 필요한 소수
+ * 자릿수다 — `factor` 가 2.5 면 그 자체로 소수 한 자리를 더 쓴다(2.5, 0.25 처럼). 이 값을
+ * `-floor(log10(step))` 처럼 걸음 "값"만으로 되짚으면 2.5×10^k 걸음마다 한 자리가 모자라
+ * 92.5 가 93 으로 뭉개진다 — factor·exponent 를 따로 들고 있어야 하는 이유다.
+ */
+private data class NiceStep(
+    val factor: Double,
+    val exponent: Int,
+) {
+    val value: Double get() = factor * 10.0.pow(exponent)
+    val decimals: Int get() = (-exponent + if (factor == 2.5) 1 else 0).coerceAtLeast(0)
+}
+
+/**
+ * "예쁜 눈금" 걸음(step)을 {1, 2, 2.5, 5}×10^k 중에서 고른다 — [lo, hi] 안에 있는 step 의 배수
+ * 개수가 [maxTicks] 이하이면서 가능하면 2개 이상이 되도록, 그중 가장 촘촘한(작은) step 을 쓴다.
+ * `lo >= hi` 이거나 NaN 이 섞이면 그릴 축이 없다는 뜻이라 빈 목록을 돌려준다.
+ */
+internal fun niceTicks(
+    lo: Double,
+    hi: Double,
+    maxTicks: Int = 6,
+): List<Double> {
+    if (lo.isNaN() || hi.isNaN() || lo >= hi) return emptyList()
+    val exp0 = floor(log10(hi - lo)).toInt()
+    val steps = ((exp0 - 4)..(exp0 + 2)).flatMap { e -> NICE_FACTORS.map { f -> NiceStep(f, e) } }.sortedBy { it.value }
+
+    fun bounds(step: NiceStep): Pair<Long, Long> {
+        val kLo = ceil(lo / step.value - NICE_TICK_EPS).toLong()
+        val kHi = floor(hi / step.value + NICE_TICK_EPS).toLong()
+        return kLo to kHi
+    }
+
+    fun ticksAt(step: NiceStep): List<Double> {
+        val (kLo, kHi) = bounds(step)
+        return (kLo..kHi).map { k -> roundToStep(k * step.value, step.decimals) }
+    }
+
+    var fallback: List<Double>? = null
+    for (step in steps) {
+        val (kLo, kHi) = bounds(step)
+        val count = (kHi - kLo + 1).coerceAtLeast(0)
+        if (count == 0L || count > maxTicks.toLong()) continue
+        val ticks = ticksAt(step)
+        if (fallback == null) fallback = ticks
+        if (count >= 2L) return ticks
+    }
+    return fallback ?: emptyList()
+}
+
+/** 부동소수 곱셈 오차를 지운다 — step=0.2 의 세 번째 배수가 0.6000000000000001 로 나오는 것을 막는다. */
+private fun roundToStep(
+    v: Double,
+    decimals: Int,
+): Double {
+    val scale = 10.0.pow(decimals)
+    return (v * scale).roundToLong() / scale
+}
+
+/**
+ * 눈금 값을 [step] 이 요구하는 소수 자릿수까지만 적는다 — 0.2 걸음이면 "99.4", 10 걸음이면
+ * 소수점 없이 "120". [levelText] 처럼 정수로 뭉개면 걸음이 1 보다 작을 때 눈금이 전부 같은
+ * 문자열이 돼 버린다(범례는 마지막 값 하나만 보여줘 그 문제가 없으므로 [levelText] 를 그대로 쓴다).
+ */
+internal fun tickLabel(
+    v: Double,
+    step: Double,
+): String {
+    var d = 0
+    while (d < 6) {
+        val scaled = step * 10.0.pow(d)
+        if (abs(scaled - scaled.roundToLong()) < 1e-6) break
+        d++
+    }
+    return String.format(Locale.ROOT, "%.${d}f", v)
+}
+
+private val QUARTER_MONTHS = setOf("01", "04", "07", "10")
+
+private fun year(date: String) = date.substring(0, 4)
+
+private fun month(date: String) = date.substring(4, 6)
+
+private fun yearMonth(date: String) = date.substring(0, 6)
+
+private fun yearMonthLabel(date: String) = "${date.substring(2, 4)}.${month(date)}"
+
+/** [dateTicks] 의 월·분기·연 후보(달력 위치, 라벨). [dateCount] 는 원래 [dates] 의 길이 — 눈금 위치를 폭에 매핑할 때 분모로 쓴다. */
+internal data class DateTickCandidates(
+    val dateCount: Int,
+    val month: List<Pair<Int, String>>,
+    val quarter: List<Pair<Int, String>>,
+    val year: List<Pair<Int, String>>,
+)
+
+/**
+ * [dates](yyyyMMdd 오름차순)에서 월·분기·연이 바뀌는 자리를 한 번만 훑어 후보로 만든다. 순수
+ * 계산이라 컴포저블에서 `remember(dates)` 로 감싸 두면, 그리기 루프(매 프레임)는 이 결과를 들고
+ * 간격 산수만 하는 [dateTicks] 오버로드를 부르면 된다 — 매 프레임 substring 을 다시 걷지 않는다.
+ */
+internal fun dateTickCandidates(dates: List<String>): DateTickCandidates {
+    val monthIdx = dates.indices.filter { i -> i == 0 || yearMonth(dates[i]) != yearMonth(dates[i - 1]) }
+    val monthTicks = monthIdx.map { it to yearMonthLabel(dates[it]) }
+    val quarterTicks = monthIdx.filter { i -> month(dates[i]) in QUARTER_MONTHS }.map { it to yearMonthLabel(dates[it]) }
+    val yearIdx = dates.indices.filter { i -> i == 0 || year(dates[i]) != year(dates[i - 1]) }
+    val yearTicks = yearIdx.map { it to year(dates[it]) }
+    return DateTickCandidates(dateCount = dates.size, month = monthTicks, quarter = quarterTicks, year = yearTicks)
+}
+
+/**
+ * 날짜 눈금. 월 → 분기 → 연 순서로(촘촘한 것부터) [candidates] 중 [plotWidthPx] 위에 늘어놨을 때
+ * 이웃 눈금 사이가 전부 [minGapPx] 이상인 첫 후보를 쓴다. 연도까지도 너무 촘촘하면 몇 개씩
+ * 걸러(every n-th) 간격을 맞춘다. 간격 산수만 하는 순수 함수라 매 프레임 불러도 싸다.
+ */
+internal fun dateTicks(
+    candidates: DateTickCandidates,
+    plotWidthPx: Float,
+    minGapPx: Float,
+): List<Pair<Int, String>> {
+    if (candidates.dateCount < 2) return emptyList()
+    val denom = (candidates.dateCount - 1).toFloat()
+
+    fun x(i: Int) = i / denom * plotWidthPx
+
+    fun gapsHold(ticks: List<Pair<Int, String>>): Boolean {
+        for (k in 1 until ticks.size) if (x(ticks[k].first) - x(ticks[k - 1].first) < minGapPx) return false
+        return true
+    }
+
+    if (gapsHold(candidates.month)) return candidates.month
+    if (candidates.quarter.isNotEmpty() && gapsHold(candidates.quarter)) return candidates.quarter
+    if (gapsHold(candidates.year)) return candidates.year
+
+    var stride = 2
+    while (!gapsHold(candidates.year.filterIndexed { i, _ -> i % stride == 0 })) stride++
+    return candidates.year.filterIndexed { i, _ -> i % stride == 0 }
+}
+
+/** [dates] 를 매번 훑는 얇은 겹침 — 테스트와 옛 호출부용. 그리기 루프에서는 [dateTickCandidates] 를 먼저 `remember` 하고 위 오버로드를 쓴다. */
+internal fun dateTicks(
+    dates: List<String>,
+    plotWidthPx: Float,
+    minGapPx: Float,
+): List<Pair<Int, String>> = dateTicks(dateTickCandidates(dates), plotWidthPx, minGapPx)
+
 /**
  * 선 하나. NaN 은 붓을 뗀다 — 이어 그리지 않는다. [step] 이면 새 값이 나올 때까지 이전 값을
  * 수평으로 유지하다 수직으로 잇는다("마지막 값을 유지하는 계단", 사양 §6).
@@ -413,6 +658,7 @@ private fun DrawScope.drawSeries(
     step: Boolean,
     toX: (Int) -> Float,
     toY: (Double) -> Float,
+    width: Dp,
 ) {
     val path = Path()
     var active = false
@@ -442,16 +688,22 @@ private fun DrawScope.drawSeries(
         lastY = y
         active = true
     }
-    drawPath(path, color = color, style = Stroke(width = LINE_WIDTH.toPx()))
+    drawPath(path, color = color, style = Stroke(width = width.toPx()))
 }
 
+/** 관측 점. 선과 겹쳐도 보이도록 [ringColor](보통 surface) 테두리를 한 겹 깔고 그 위에 점을 찍는다. */
 private fun DrawScope.drawDots(
     dots: List<Pair<Int, Double>>,
     color: Color,
+    ringColor: Color,
     toX: (Int) -> Float,
     toY: (Double) -> Float,
 ) {
-    dots.forEach { (i, v) -> drawCircle(color = color, radius = DOT_RADIUS.toPx(), center = Offset(toX(i), toY(v))) }
+    dots.forEach { (i, v) ->
+        val center = Offset(toX(i), toY(v))
+        drawCircle(color = ringColor, radius = (DOT_RADIUS + DOT_RING_WIDTH).toPx(), center = center)
+        drawCircle(color = color, radius = DOT_RADIUS.toPx(), center = center)
+    }
 }
 
 /** 마지막 [Track.HORIZON] 거래일 음영. 달력이 그보다 짧으면 있는 만큼만 칠한다. */
@@ -459,18 +711,42 @@ private fun DrawScope.drawHorizonShading(
     dateCount: Int,
     toX: (Int) -> Float,
     color: Color,
+    plot: PlotArea,
 ) {
     if (dateCount == 0) return
     val start = (dateCount - Track.HORIZON).coerceAtLeast(0)
     val x0 = toX(start)
-    drawRect(color = color.copy(alpha = SHADE_ALPHA), topLeft = Offset(x0, 0f), size = Size(size.width - x0, size.height))
+    drawRect(color = color.copy(alpha = SHADE_ALPHA), topLeft = Offset(x0, plot.top), size = Size(plot.right - x0, plot.bottom - plot.top))
 }
 
 private fun DrawScope.drawHorizontalLine(
     y: Float,
+    plot: PlotArea,
     color: Color,
 ) {
-    drawLine(color = color, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1.dp.toPx())
+    drawLine(color = color, start = Offset(plot.left, y), end = Offset(plot.right, y), strokeWidth = 1.dp.toPx())
+}
+
+/** 날짜 눈금마다 세로 격자선 한 줄 — 두 차트가 함께 쓴다. */
+private fun DrawScope.drawVerticalGrid(
+    ticks: List<Int>,
+    toX: (Int) -> Float,
+    plot: PlotArea,
+    color: Color,
+) {
+    ticks.forEach { i ->
+        drawLine(color = color, start = Offset(toX(i), plot.top), end = Offset(toX(i), plot.bottom), strokeWidth = 1.dp.toPx())
+    }
+}
+
+/** 값 눈금마다 가로 격자선 한 줄. 색이 전부 같을 때만 쓴다 — 칠할 색이 눈금마다 다르면(차트 2의 0 기준선) [drawHorizontalLine] 을 직접 쓴다. */
+private fun DrawScope.drawHorizontalGrid(
+    ticks: List<Double>,
+    toY: (Double) -> Float,
+    plot: PlotArea,
+    color: Color,
+) {
+    ticks.forEach { v -> drawHorizontalLine(toY(v), plot, color) }
 }
 
 private fun DrawScope.drawLabel(
@@ -496,60 +772,76 @@ private fun DrawScope.drawLabelRight(
     drawText(layout, color = color, topLeft = Offset(rightX - layout.size.width, y))
 }
 
-/**
- * 왼쪽 위: 최댓값(왼쪽 축). 오른쪽 위: 100%(오른쪽 축 — 모델 목표). 아래 줄: 최솟값(왼쪽 축) +
- * (간격) + 첫 날짜, 오른쪽에 마지막 날짜. 그 한 줄 위 오른쪽에 0%(오른쪽 축).
- */
-private fun DrawScope.drawChart1Labels(
+/** 왼쪽 여백에 왼쪽 정렬로, 눈금 위치에 세로 가운데를 맞춰 그린다. 위아래로 캔버스를 벗어나지 않게 막는다(브리프 규칙 2). */
+private fun DrawScope.drawAxisLabelLeft(
     measurer: TextMeasurer,
     style: TextStyle,
     color: Color,
-    dates: List<String>,
-    lo: Double,
-    hi: Double,
+    text: String,
+    centerY: Float,
 ) {
-    if (dates.isEmpty()) return
-    val lineHeight = measurer.measure("0", style = style).size.height
-    val bottomY = size.height - lineHeight
-    drawLabel(measurer, style, color, levelText(hi), 0f, 0f)
-    drawLabelRight(measurer, style, color, "100%", size.width, 0f)
-    drawLabelRight(measurer, style, color, "0%", size.width, bottomY - lineHeight)
-    val minText = levelText(lo)
-    drawLabel(measurer, style, color, minText, 0f, bottomY)
-    val minWidth = measurer.measure(minText, style = style).size.width
-    drawLabel(measurer, style, color, formatDate(dates.first()), minWidth + LABEL_GAP.toPx(), bottomY)
-    drawLabelRight(measurer, style, color, formatDate(dates.last()), size.width, bottomY)
+    val h = measurer.measure(text, style = style).size.height
+    val top = (centerY - h / 2f).coerceIn(0f, size.height - h)
+    drawLabel(measurer, style, color, text, 0f, top)
 }
 
-/** 왼쪽 위: +1. 왼쪽 가운데: 0. 아래 줄: −1 + (간격) + 첫 날짜, 오른쪽에 마지막 날짜(§6: "min/max 와 0"). */
-private fun DrawScope.drawChart2Labels(
+/** 오른쪽 여백에 오른쪽 정렬로, 눈금 위치에 세로 가운데를 맞춰 그린다. */
+private fun DrawScope.drawAxisLabelRight(
     measurer: TextMeasurer,
     style: TextStyle,
     color: Color,
-    dates: List<String>,
+    text: String,
+    centerY: Float,
 ) {
-    if (dates.isEmpty()) return
-    val lineHeight =
-        measurer
-            .measure("0", style = style)
-            .size.height
-            .toFloat()
-    val bottomY = size.height - lineHeight
-    val minText = "−1"
-    drawLabel(measurer, style, color, "+1", 0f, 0f)
-    drawLabel(measurer, style, color, "0", 0f, size.height / 2 - lineHeight / 2)
-    drawLabel(measurer, style, color, minText, 0f, bottomY)
-    val minWidth = measurer.measure(minText, style = style).size.width
-    drawLabel(measurer, style, color, formatDate(dates.first()), minWidth + LABEL_GAP.toPx(), bottomY)
-    drawLabelRight(measurer, style, color, formatDate(dates.last()), size.width, bottomY)
+    val h = measurer.measure(text, style = style).size.height
+    val top = (centerY - h / 2f).coerceIn(0f, size.height - h)
+    drawLabelRight(measurer, style, color, text, size.width, top)
 }
+
+/** 아래 축 라벨 한 줄. 눈금 위치에 가로 가운데를 맞추되 첫째·마지막은 캔버스 밖으로 안 나가게 막는다. */
+private fun DrawScope.drawAxisLabelBottom(
+    measurer: TextMeasurer,
+    style: TextStyle,
+    color: Color,
+    text: String,
+    centerX: Float,
+    rowY: Float,
+) {
+    val layout = measurer.measure(text, style = style)
+    val w = layout.size.width.toFloat()
+    val left = (centerX - w / 2f).coerceIn(0f, size.width - w)
+    drawText(layout, color = color, topLeft = Offset(left, rowY))
+}
+
+/** 범례 한 줄. [dot] 이면 관측 점을 닮은 원 스와치, 아니면 선을 닮은 막대 스와치를 그린다. */
+private data class LegendEntry(
+    val name: String,
+    val value: String,
+    val color: Color,
+    val dot: Boolean = false,
+)
 
 /** 차트 아래 범례. 터치 스크럽은 1차 범위 밖이라 각 계열의 마지막 값만 보여준다(사양 §6). */
 @Composable
-private fun ChartLegend(vararg items: Pair<String, String>) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        items.forEach { (name, value) ->
-            Text("$name $value", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun ChartLegend(vararg items: LegendEntry) {
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (item.dot) {
+                    Box(Modifier.size(10.dp).background(item.color, CircleShape))
+                } else {
+                    Box(Modifier.size(width = 14.dp, height = 3.dp).background(item.color, RoundedCornerShape(2.dp)))
+                }
+                Text(
+                    "${item.name} ${item.value}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

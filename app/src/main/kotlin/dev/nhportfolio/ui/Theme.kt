@@ -307,3 +307,36 @@ fun ThemeMode.isDark(): Boolean =
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
+
+/**
+ * 효용성 차트 다섯 계열의 선 색. 예전에는 색을 안 나눠 쓰고 [MaterialTheme.colorScheme] 의
+ * primary/secondary/tertiary 를 그대로 썼는데, 다크 테마는 [DarkScheme] 의 primary·secondary가
+ * 둘 다 [Fern] 이라 069500 선과 동일가중 평균 선이 겹쳐 보였다 — 차트 전용 팔레트로 갈라 둔다.
+ */
+data class ChartColors(
+    val index: Color,
+    val equal: Color,
+    val target: Color,
+    val coincident: Color,
+    val predictive: Color,
+)
+
+@Composable
+fun chartColors(): ChartColors =
+    if (onDark()) {
+        ChartColors(
+            index = StockIndigoDark,
+            equal = CashAmberDark,
+            target = Fern,
+            coincident = StockIndigoDark,
+            predictive = EmberLight,
+        )
+    } else {
+        ChartColors(
+            index = StockIndigo,
+            equal = CashAmber,
+            target = Moss,
+            coincident = StockIndigo,
+            predictive = Ember,
+        )
+    }
