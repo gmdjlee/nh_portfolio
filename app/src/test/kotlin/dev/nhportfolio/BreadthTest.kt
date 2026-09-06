@@ -350,4 +350,38 @@ class BreadthTest {
         val last = assertNotNull(series.last())
         assertEquals(Breadth.PCT_WIN, last.window)
     }
+
+    // ---- rollingSmooth (옛 smoothLast 와 비트 단위로 같음) ----
+
+    /**
+     * [Breadth.rollingSmooth] 가 이동합을 유지하는 쪽(창을 나갈 때 빼는 방식)으로
+     * 되돌아가면, 부동소수점 가산의 결합법칙 부재 때문에 이 비교가 마지막 비트에서
+     * 갈릴 수 있다 — 백분위(pctRank)는 분모가 2n 인 유리수라 반올림 동점이 실제로
+     * 나오므로, 옛 smoothLast 처럼 창마다 오름차순으로 새로 더한 참조값과 정의된 모든
+     * 인덱스에서 정확히(오차 허용 없이) 같아야 한다. 비교 개수가 충분한지도 같이
+     * 확인해 이 테스트가 공허하게 통과하지 못하게 한다.
+     */
+    @Test
+    fun `rollingSmooth 는 창마다 옛 smoothLast 순서로 다시 더한 값과 비트 단위로 같다`() {
+        val rnd = Random(88)
+        val days = 2_000
+        // breadthSeries 대신 임의의 정의 구간을 흉내낸 값을 pctRank 에 통과시켜, 실제
+        // 백분위처럼 분모가 2n 인 유리수(반올림 동점이 걸리는 값)를 만든다.
+        val raw = DoubleArray(days) { t -> if (t < 60) Double.NaN else rnd.nextInt(0, 1_000) / 1_000.0 }
+        val pctile = Breadth.pctRank(raw)
+
+        var compared = 0
+        for (sm in listOf(20, 40, 60)) {
+            val rolling = Breadth.rollingSmooth(pctile, sm)
+            for (t in pctile.indices) {
+                if (rolling[t].isNaN()) continue
+                var expected = 0.0
+                for (i in t - sm + 1..t) expected += pctile[i]
+                expected /= sm
+                assertEquals(expected, rolling[t], "sm=$sm, t=$t 에서 rollingSmooth 가 새로 더한 참조값과 다르다")
+                compared++
+            }
+        }
+        assertTrue(compared > 300, "정의된 인덱스가 $compared 개뿐이라 이 테스트가 공허하게 통과할 수 있다")
+    }
 }

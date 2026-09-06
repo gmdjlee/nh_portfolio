@@ -266,25 +266,38 @@ object Breadth {
 
     /**
      * [values] 의 트레일링 [sm]-일 평균 시계열. 창 안에 NaN 이 하나라도 있으면 그 날은
-     * NaN 이다. 이동합과 창 안의 NaN 개수를 같이 유지해 날짜당 O(1)로 갱신한다.
+     * NaN 이다. 정의 여부는 창 안의 NaN 개수를 이동개수로 유지해 O(1)에 판단하지만, 합
+     * 자체는 그 창의 [sm] 개를 인덱스 오름차순으로 매번 0.0 부터 새로 더한다(옛
+     * smoothLast 와 같은 순서 — [windowMean] 참고). 이동합에서 빠지는 값을 빼는 식으로
+     * 구하면 부동소수점 가산에 결합법칙이 없어 같은 결과를 보장하지 못하고, 평활값은
+     * 그 뒤 [roundToEighth] 의 반올림 동점(짝수로) 판정을 거치므로 백분위처럼 분모가
+     * 2n 인 유리수에서 실제로 동점에 걸린다 — 그 미세한 차이가 동점을 한쪽으로 밀면
+     * targetBp 가 1250bp 어긋날 수 있다. sm 은 최대 60 인 상수라 창을 다시 더해도
+     * 전체는 여전히 O(n) 이다.
      */
-    private fun rollingSmooth(
+    internal fun rollingSmooth(
         values: DoubleArray,
         sm: Int,
     ): DoubleArray {
         val out = DoubleArray(values.size)
-        var sum = 0.0
         var nanCount = 0
         for (t in values.indices) {
-            val v = values[t]
-            if (v.isNaN()) nanCount++ else sum += v
-            if (t >= sm) {
-                val dropped = values[t - sm]
-                if (dropped.isNaN()) nanCount-- else sum -= dropped
-            }
-            out[t] = if (t >= sm - 1 && nanCount == 0) sum / sm else Double.NaN
+            if (values[t].isNaN()) nanCount++
+            if (t >= sm && values[t - sm].isNaN()) nanCount--
+            out[t] = if (t >= sm - 1 && nanCount == 0) windowMean(values, t, sm) else Double.NaN
         }
         return out
+    }
+
+    /** [t] 에서 끝나는 길이 [sm] 창의 평균. 옛 smoothLast 와 같은 오름차순으로 매번 0.0 부터 새로 더한다. */
+    private fun windowMean(
+        values: DoubleArray,
+        t: Int,
+        sm: Int,
+    ): Double {
+        var sum = 0.0
+        for (i in t - sm + 1..t) sum += values[i]
+        return sum / sm
     }
 
     private fun roundToEighth(x: Double): Double = round(x * EIGHTHS) / EIGHTHS
